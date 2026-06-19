@@ -1,6 +1,7 @@
 // flue-blueprint: channel/github@1
 import { createGitHubChannel } from '@flue/github';
 import { Octokit } from '@octokit/rest';
+import { getDedupStore } from '../lib/dedup.ts';
 
 // Outbound GitHub API client. Used by lib/diff.ts (fetch diff) and
 // lib/post-review.ts (post summary + inline comments) in later phases.
@@ -20,6 +21,13 @@ export const channel = createGitHubChannel({
   // never block the response on diff fetching or LLM calls.
   async webhook({ delivery }) {
     if (delivery.name === 'pull_request' && REVIEW_ACTIONS.has(delivery.payload.action)) {
+      // Idempotency: claim the delivery before any work; skip replays/redeliveries.
+      // (A distinct `synchronize` push has its own deliveryId and is not skipped.)
+      if (!getDedupStore().claim(delivery.deliveryId)) {
+        console.log('[mimir] duplicate delivery skipped', delivery.deliveryId);
+        return;
+      }
+
       const { repository, pull_request } = delivery.payload;
       const pr = {
         owner: repository.owner.login,
@@ -28,7 +36,6 @@ export const channel = createGitHubChannel({
         headSha: pull_request.head.sha,
       };
 
-      // Phase 2: claim `delivery.deliveryId` for idempotency (skip if already seen).
       // Phase 3: admit a durable `review-pr` workflow run for `pr`, then return.
       console.log('[mimir] review requested', { deliveryId: delivery.deliveryId, ...pr });
       return;

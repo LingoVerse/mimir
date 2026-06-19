@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .flue/
+data/
 .env
 .env.*
 !.env.example

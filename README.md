@@ -51,8 +51,8 @@ bun install
 cp .env.example .env   # fill in OpenRouter + GitHub secrets
 ```
 
-Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`, `bun run lint`,
-`bun run format`.
+Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`,
+`bun run test` (node --test), `bun run lint`, `bun run format`.
 
 ## Status
 
@@ -63,7 +63,12 @@ Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`
   admits PR events fast; `review-pr` workflow skeleton added so the app boots. Live-tested
   against `flue dev`: valid ping → **200 in ~17ms**, bad signature → **401**, `pull_request`
   opened → **200 in ~3ms** (hits the review seam), form-encoded → **415** (JSON-only).
-- Phases 2–6 (dedup + diff, review workflow body, dual-model, posting, deploy) not yet started.
+- **Phase 2 — dedup + diff: done.** `lib/dedup.ts` claims `deliveryId` in SQLite (`node:sqlite`,
+  zero native deps) and is wired into the channel before any work; `lib/diff.ts` fetches the
+  per-file diff via octokit, drops generated/vendored paths, and caps to a token budget
+  (largest-change files first, truncation reported). Unit tests via `node --test` (5 pass) and a
+  live replay check: same `deliveryId` twice → second skipped; distinct id → reviewed.
+- Phases 3–6 (review workflow body, dual-model, posting, deploy) not yet started.
 
 ### Verified against live docs (build-spec §0 gates)
 
