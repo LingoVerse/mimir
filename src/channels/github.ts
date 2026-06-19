@@ -1,17 +1,28 @@
 // flue-blueprint: channel/github@1
 import { createGitHubChannel } from '@flue/github';
-import { Octokit } from '@octokit/rest';
 import { getDedupStore } from '../lib/dedup.ts';
-
-// Outbound GitHub API client. Used by lib/diff.ts (fetch diff) and
-// lib/post-review.ts (post summary + inline comments) in later phases.
-export const client = new Octokit({
-  auth: process.env.GITHUB_TOKEN,
-});
+import type { ReviewPayload } from '../workflows/review-pr.ts';
 
 // PR actions that trigger a review. Subscribe to `pull_request` (these actions)
 // in the GitHub webhook config; content type must be application/json.
 const REVIEW_ACTIONS = new Set(['opened', 'synchronize', 'reopened']);
+
+// Admit a durable `review-pr` workflow run via its mounted route, then return.
+// Flue has no programmatic workflow-admit API, so we POST the mounted route
+// (the doc-endorsed handoff). No `?wait`, so it returns 202 immediately and the
+// run proceeds durably — the response never blocks on the diff fetch or LLM.
+// INTERNAL_BASE_URL pins the self-call to a loopback in prod (behind a proxy);
+// otherwise the inbound request's own origin is used.
+async function admitReview(requestUrl: string, pr: ReviewPayload): Promise<void> {
+  const base = process.env.INTERNAL_BASE_URL ?? new URL(requestUrl).origin;
+  const res = await fetch(`${base}/workflows/review-pr`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(pr),
+  });
+  const body = (await res.json().catch(() => ({}))) as { runId?: string };
+  console.log('[mimir] review admitted', { ...pr, status: res.status, runId: body.runId });
+}
 
 export const channel = createGitHubChannel({
   webhookSecret: process.env.GITHUB_WEBHOOK_SECRET!,
@@ -19,7 +30,7 @@ export const channel = createGitHubChannel({
   // Mounted at POST /channels/github/webhook. GitHub expects a 2xx within ~10s
   // and does not auto-retry, so verify, admit durable work, and return fast —
   // never block the response on diff fetching or LLM calls.
-  async webhook({ delivery }) {
+  async webhook({ c, delivery }) {
     if (delivery.name === 'pull_request' && REVIEW_ACTIONS.has(delivery.payload.action)) {
       // Idempotency: claim the delivery before any work; skip replays/redeliveries.
       // (A distinct `synchronize` push has its own deliveryId and is not skipped.)
@@ -29,15 +40,12 @@ export const channel = createGitHubChannel({
       }
 
       const { repository, pull_request } = delivery.payload;
-      const pr = {
+      await admitReview(c.req.url, {
         owner: repository.owner.login,
         repo: repository.name,
         number: pull_request.number,
         headSha: pull_request.head.sha,
-      };
-
-      // Phase 3: admit a durable `review-pr` workflow run for `pr`, then return.
-      console.log('[mimir] review requested', { deliveryId: delivery.deliveryId, ...pr });
+      });
       return;
     }
 

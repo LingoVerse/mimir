@@ -30,12 +30,14 @@ ref). We use `src/`, so the build-spec layout holds:
 ```
 src/
   channels/
-    github.ts     # verified webhook ingress + octokit client       (Phase 1 ✓)
+    github.ts     # verified webhook ingress; dedup + admit review run  (Phase 1–3 ✓)
   workflows/
-    review-pr.ts  # admission target + skeleton (Phase 1 ✓);
-                  #   deterministic pipeline body                    (Phase 3)
+    review-pr.ts  # resolve PR → diff → skills → primary pass (struct.)  (Phase 3 ✓)
+  skills/
+    review-rubric/SKILL.md    security-check/SKILL.md                    (Phase 3 ✓)
   lib/
-    diff.ts  dedup.ts  escalation.ts  post-review.ts                (Phase 2/4/5)
+    github.ts  diff.ts  dedup.ts  review.ts  security-paths.ts           (Phase 1–3 ✓)
+    escalation.ts  post-review.ts                                        (Phase 4/5)
 flue.config.ts    # target: 'node'
 ```
 
@@ -71,7 +73,16 @@ Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`
   per-file diff via octokit, drops generated/vendored paths, and caps to a token budget
   (largest-change files first, truncation reported). Unit tests via `node --test` (5 pass) and a
   live replay check: same `deliveryId` twice → second skipped; distinct id → reviewed.
-- Phases 3–6 (review workflow body, dual-model, posting, deploy) not yet started.
+- **Phase 3 — review workflow: done.** `review-pr` resolves the PR from the payload, fetches the
+  diff, loads skills (`review-rubric` always; `security-check` when `lib/security-paths.ts` flags a
+  sensitive surface), and runs a primary pass on `MODEL_PRIMARY` with a valibot-validated result
+  (`summary/verdict/confidence/findings`, `lib/review.ts`). Skills are app-owned under
+  `src/skills/` and imported with `… with { type: 'skill' }`. The channel claims the delivery then
+  admits a durable run via `POST /workflows/review-pr`. Verified: `flue run review-pr` runs to the
+  diff fetch (401 on dummy token — pipeline wired); a signed `pull_request` → webhook **200/45ms**
+  + admitted `runId`. **Not yet exercised:** the live LLM pass (needs a real `OPENROUTER_API_KEY`
+  + PR — Phase 6 smoke).
+- Phases 4–6 (dual-model escalation, posting, deploy) not yet started.
 
 ### Verified against live docs (build-spec §0 gates)
 
@@ -87,9 +98,10 @@ Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`
   `GITHUB_TOKEN` (renamed from the spec's `GITHUB_APP_TOKEN`).
 - Workflows export `run(ctx)` + optional `route`; admit via `flue run` or `POST /workflows/<name>`
   → `202 { runId }`. A channel must **not** call `run()` directly — it admits through the route.
-
-### Still to verify (Phase 3)
-
-- Exact skills discovery path (`.agents/skills/<name>/SKILL.md` vs `skills/<name>/SKILL.md`).
-  Provided skills live in `specs/SKILL.review-rubric.md` and `specs/SKILL.security-check.md`.
-- Channel → `review-pr` workflow admission wiring (durable handoff from the webhook).
+- Skills: app-owned under `src/skills/<name>/SKILL.md`, imported with `with { type: 'skill' }` and
+  passed to `createAgent({ skills })`; `name` frontmatter must equal the dir. (The `.agents/skills/`
+  path is for *workspace-discovered* skills only.) Structured output uses **valibot** schemas
+  (`session.prompt(text, { result })` → validated `response.data`).
+- Channel handler receives `{ c, delivery }` (Hono context); ping is auto-handled by the channel.
+  No programmatic workflow-admit API exists, so the channel POSTs the mounted workflow route
+  (`INTERNAL_BASE_URL` pins the loopback in prod).
