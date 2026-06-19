@@ -26,15 +26,20 @@ ref). We use `src/`, so the build-spec layout holds:
 
 ```
 src/
-  app.ts          # OpenRouter provider registration + Flue mount   (Phase 1)
   channels/
-    github.ts     # verified webhook ingress + octokit client       (Phase 1)
+    github.ts     # verified webhook ingress + octokit client       (Phase 1 ✓)
   workflows/
-    review-pr.ts  # deterministic review pipeline                   (Phase 3)
+    review-pr.ts  # admission target + skeleton (Phase 1 ✓);
+                  #   deterministic pipeline body                    (Phase 3)
   lib/
     diff.ts  dedup.ts  escalation.ts  post-review.ts                (Phase 2/4/5)
 flue.config.ts    # target: 'node'
 ```
+
+No `src/app.ts`: `openrouter` is a **built-in** Flue provider (no `registerProvider`
+needed — just `OPENROUTER_API_KEY`), and without `app.ts` Flue auto-mounts its routes at
+`/` and discovers `channels/github.ts` → `POST /channels/github/webhook`. Add `app.ts`
+only later if a custom route is needed (e.g. `/health` for deploy).
 
 Workflows and channels are discovered by flat filename inside their dirs; keep those dirs
 flat (nested files are not discovered). Everything else goes under `src/lib/`.
@@ -52,22 +57,31 @@ Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`
 ## Status
 
 - **Phase 0 — scaffold: done.** Flue project initialized (`@flue/runtime@1.0.0-beta.2`,
-  `@flue/cli@1.0.0-beta.1`), Bun toolchain, TS (`tsc --noEmit`) + Biome lint, `.env.example`.
-- Phases 1–6 (provider + channel, dedup + diff, review workflow, dual-model, posting, deploy)
-  not yet started.
+  `@flue/cli@1.0.0-beta.1`), Bun toolchain, TS (`tsc --noEmit`) + oxlint/oxfmt, `.env.example`.
+- **Phase 1 — provider + channel: done.** `openrouter` confirmed built-in (no provider code);
+  `@flue/github` + `@octokit/rest@22.0.1` installed; `channels/github.ts` verifies webhooks and
+  admits PR events fast; `review-pr` workflow skeleton added so the app boots. Live-tested
+  against `flue dev`: valid ping → **200 in ~17ms**, bad signature → **401**, `pull_request`
+  opened → **200 in ~3ms** (hits the review seam), form-encoded → **415** (JSON-only).
+- Phases 2–6 (dedup + diff, review workflow body, dual-model, posting, deploy) not yet started.
 
 ### Verified against live docs (build-spec §0 gates)
 
 - `flue init --target node` is the real init command; CLI surface confirmed via `flue --help`.
-- `registerProvider` shape (`api: 'openai-completions'`, `baseUrl`, `apiKey`, `headers`) matches
-  the spec — confirmed against the Ollama example in the models doc.
-- Model specifier format is `provider-id/model-id`. Flue's model layer is **Pi** (`pi.dev`).
+- Model layer is **Pi** (`pi.dev`); model specifier is `provider-id/model-id`. `openrouter` is a
+  **built-in provider** (env `OPENROUTER_API_KEY`) — the spec's §4 `registerProvider` + Hono
+  `app.ts` is unnecessary.
+- Provider ID splits on the **first** slash: `openrouter/z-ai/glm-5.2` → provider `openrouter`,
+  model `z-ai/glm-5.2` (models-doc table) — no alias map needed (resolves build-spec §4 gate).
 - Source-discovery root rule (`.flue/` → `src/` → root) confirms the `src/` layout.
+- GitHub channel API confirmed via `flue add channel github` blueprint: `createGitHubChannel`,
+  path `/channels/github/webhook`, `delivery.{name,payload,deliveryId}`, outbound auth via
+  `GITHUB_TOKEN` (renamed from the spec's `GITHUB_APP_TOKEN`).
+- Workflows export `run(ctx)` + optional `route`; admit via `flue run` or `POST /workflows/<name>`
+  → `202 { runId }`. A channel must **not** call `run()` directly — it admits through the route.
 
-### Still to verify before/in Phase 1 (do not assume)
+### Still to verify (Phase 3)
 
-- Whether Flue splits the provider ID on the **first** slash only, so `openrouter/z-ai/glm-...`
-  routes to provider `openrouter` with model `z-ai/glm-...` (build-spec §4).
-- The GitHub channel API — generate with `flue add channel github` and adapt (build-spec §6).
 - Exact skills discovery path (`.agents/skills/<name>/SKILL.md` vs `skills/<name>/SKILL.md`).
   Provided skills live in `specs/SKILL.review-rubric.md` and `specs/SKILL.security-check.md`.
+- Channel → `review-pr` workflow admission wiring (durable handoff from the webhook).
