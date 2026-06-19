@@ -9,15 +9,18 @@ Replacement for the consumer Gemini Code Assist GitHub reviewer (shutdown 2026-0
 
 ## Toolchain
 
-- **Runtime / package manager:** Bun `1.3.14`. Flue's documented minimum is Node `>=22.19.0`;
-  per the build spec we tried Bun first. `bun add` of `@flue/runtime` + `@flue/cli` and
-  `flue init` / `flue docs` / typecheck / lint all work under Bun. **Deploy target is `node`**
-  (`flue.config.ts` → `target: 'node'`); Bun is only the local dev toolchain.
-- **Open watch-item:** Bun blocked the lifecycle scripts of three native transitive deps of
-  `@flue/runtime` — `node-liblzma`, `@mongodb-js/zstd`, `protobufjs`. They are not exercised
-  yet (Phase 0 does not run the runtime). If `flue dev` / `@flue/github` misbehave under Bun
-  in Phase 1, either `bun pm trust` those packages or fall back to Node 22 LTS — do not spend
-  more than ~30 min before falling back (build spec §2).
+- **Bun is the package manager + script runner; the runtime is Node.** Flue's minimum is
+  Node `>=22.19.0`. We use `bun install` / `bun run`, but `flue` itself runs under **Node**:
+  the `flue` bin is `#!/usr/bin/env node`, so `bun run dev/build` dispatches it to Node.
+  **Deploy target is `node`** (`flue.config.ts` → `target: 'node'`).
+- **Bun cannot run Flue as a runtime (verified empirically).** A Bun-only Docker image
+  (`oven/bun`, no real Node) fails `flue build --target node` with
+  `SyntaxError: Export named 'registerHooks' not found in module 'node:module'` — `@flue/cli`
+  needs Node's `node:module.registerHooks`, which Bun 1.3.14 lacks. So building/serving under
+  Bun-only is not possible today; this is why dedup uses `node:sqlite` (not `bun:sqlite`).
+- **Native postinstalls:** Bun blocks lifecycle scripts of three native transitive deps of
+  `@flue/runtime` (`node-liblzma`, `@mongodb-js/zstd`, `protobufjs`). They never bit through
+  Phase 2 (`flue build`/`dev` run the server under Node, which ships prebuilt binaries).
 
 ## Project layout
 
