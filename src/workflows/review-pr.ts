@@ -1,5 +1,6 @@
 import { type FlueContext, type WorkflowRouteHandler, createAgent } from '@flue/runtime';
 import { type PrDiff, fetchPrDiff } from '../lib/diff.ts';
+import { decideEscalation } from '../lib/escalation.ts';
 import { client } from '../lib/github.ts';
 import { ReviewResultSchema } from '../lib/review.ts';
 import { touchesSensitivePath } from '../lib/security-paths.ts';
@@ -15,11 +16,14 @@ export interface ReviewPayload {
   headSha: string;
 }
 
-// Primary reviewer. Model is env-configured (OpenRouter slug) so swapping it is
-// a config change. Both skills are registered; the security one is applied only
+// Env-configured model tiers (OpenRouter slugs) so swapping is a config change.
+const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? 'openrouter/z-ai/glm-5.2';
+const ESCALATION_MODEL = process.env.MODEL_ESCALATION ?? 'openrouter/google/gemini-flash-3';
+
+// Primary reviewer. Both skills are registered; the security one is applied only
 // when the diff touches a sensitive surface.
 const reviewer = createAgent(() => ({
-  model: process.env.MODEL_PRIMARY ?? 'openrouter/z-ai/glm-5.2',
+  model: PRIMARY_MODEL,
   skills: [reviewRubric, securityCheck],
 }));
 
@@ -38,17 +42,10 @@ function renderDiff(diff: PrDiff): string {
   return parts.join('\n\n');
 }
 
-export async function run({ init, payload }: FlueContext<ReviewPayload>) {
-  // 1. Fetch + chunk the diff (generated/vendored paths already filtered).
-  const diff = await fetchPrDiff(client, payload);
-  const securitySensitive = touchesSensitivePath(diff.files.map((f) => f.filename));
-
-  // 2. Primary pass: apply review-rubric (+ security-check when sensitive) over
-  //    the diff and return findings validated against the review schema.
-  const harness = await init(reviewer);
-  const session = await harness.session();
-
-  const instruction = [
+// Shared instruction for both the primary and escalation passes (same rubric,
+// different model). The skills enforce restraint, so the prompt only frames it.
+function buildInstruction(payload: ReviewPayload, diff: PrDiff, securitySensitive: boolean): string {
+  return [
     'Review this pull-request diff. Apply the `review-rubric` skill to produce your findings.',
     securitySensitive
       ? 'This diff changes security-sensitive paths — also apply the `security-check` skill and merge its findings.'
@@ -59,19 +56,60 @@ export async function run({ init, payload }: FlueContext<ReviewPayload>) {
   ]
     .filter((line): line is string => line !== null)
     .join('\n');
+}
 
-  const response = await session.prompt(instruction, { result: ReviewResultSchema });
+export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
+  // 1. Fetch + chunk the diff (generated/vendored paths already filtered).
+  const diff = await fetchPrDiff(client, payload);
+  const securitySensitive = touchesSensitivePath(diff.files.map((f) => f.filename));
+  const instruction = buildInstruction(payload, diff, securitySensitive);
+
+  // 2. Primary pass on MODEL_PRIMARY.
+  const harness = await init(reviewer);
+  const primary = (
+    await (await harness.session()).prompt(instruction, { result: ReviewResultSchema })
+  ).data;
+
+  // 3. Escalation decision (§5). Logged for cost/escalation-rate observability.
+  const decision = decideEscalation({
+    totalChangedLines: diff.totalChangedLines,
+    securitySensitive,
+    review: primary,
+  });
+  log.info('escalation decision', {
+    escalate: decision.escalate,
+    reasons: decision.reasons,
+    model: decision.escalate ? ESCALATION_MODEL : PRIMARY_MODEL,
+    totalChangedLines: diff.totalChangedLines,
+    confidence: primary.confidence,
+    criticalFindings: primary.findings.filter((f) => f.severity === 'critical').length,
+  });
+
+  // 4. If escalating, re-review the whole diff on MODEL_ESCALATION (independent
+  //    session) and let the stronger result replace the primary one — this also
+  //    double-checks critical claims to cut false positives (§5.4).
+  let review = primary;
+  if (decision.escalate) {
+    const escalationSession = await harness.session('escalation');
+    review = (
+      await escalationSession.prompt(instruction, {
+        result: ReviewResultSchema,
+        model: ESCALATION_MODEL,
+      })
+    ).data;
+  }
 
   return {
     pr: payload,
     securitySensitive,
+    escalation: { escalated: decision.escalate, reasons: decision.reasons },
     stats: {
       reviewedFiles: diff.files.length,
       skipped: diff.skipped.length,
       totalChangedLines: diff.totalChangedLines,
       truncated: diff.truncated,
     },
-    review: response.data,
+    review,
   };
 }
 
