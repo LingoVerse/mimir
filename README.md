@@ -59,6 +59,23 @@ cp .env.example .env   # fill in OpenRouter + GitHub secrets
 Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`,
 `bun run test` (node --test), `bun run lint`, `bun run format`.
 
+## Deploy (Docker → Node)
+
+The image is **Node-based** (Node 24): `flue build` needs Node's `node:module.registerHooks`,
+which Bun lacks, so Bun is only the package manager — `flue` runs under Node via its bin shebang.
+Multi-stage `Dockerfile`: build (`bun install` + `flue build`) → production deps → Node-only
+runtime (non-root, listens on `PORT`/3000, binds `0.0.0.0`, healthcheck). SQLite (dedup +
+summary-comment ids) lives on the `/data` volume (`DATABASE_URL=sqlite:/data/mimir.db`).
+
+```bash
+docker compose up -d --build        # or: docker build -t mimir . && docker run ...
+```
+
+Supply secrets at **runtime** (the built server does not read `.env`): set
+`OPENROUTER_API_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`, `MODEL_PRIMARY/ESCALATION` via
+the compose `env_file` or Dokploy's env UI. Point the GitHub webhook (content-type
+`application/json`) at `https://<host>/channels/github/webhook`.
+
 ## Status
 
 - **Phase 0 — scaffold: done.** Flue project initialized (`@flue/runtime@1.0.0-beta.2`,
@@ -97,7 +114,16 @@ Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`
   instead of stacking; inline failures (a line not in the diff → 422) degrade to a warning so the
   summary still posts. Pure helpers + store idempotency unit-tested (17 total). Live posting needs
   creds (Phase 6 smoke).
-- Phase 6 (deploy) not yet started.
+- **Phase 6 — deploy: done.** Multi-stage `Dockerfile` (Node 24, non-root) + `.dockerignore` +
+  `docker-compose.yml`. Verified empirically: image builds (`flue build` runs under Node in the
+  container), boots binding `0.0.0.0:3000`, signed ping → **200** from host and in-container,
+  `HEALTHCHECK` → **healthy**. SQLite persists on the `/data` volume. The remaining live check is
+  §11 against a real repo PR (needs real `OPENROUTER_API_KEY` + `GITHUB_TOKEN` + a webhook).
+- **Phase 7 — repo context ("project embedding" foundation): designed, not built.** Verified the
+  Flue gates: read-only repo tools (`defineTool`, scoped to `{owner,repo,headSha}`) are the safe
+  path; Flue has **no runtime skill-content registration**, and loading the PR head's `.agents/skills/`
+  is a prompt-injection vector — so project conventions must be fetched from the **base branch** and
+  injected as prompt context. Implementation pending.
 
 ### Verified against live docs (build-spec §0 gates)
 
