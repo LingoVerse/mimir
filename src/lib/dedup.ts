@@ -11,6 +11,13 @@ export interface DedupStore {
   claim(deliveryId: string): boolean;
 }
 
+// Tracks the per-PR summary comment id so re-reviews (on `synchronize`) update
+// the prior comment instead of stacking new ones (§7 step 6). Same SQLite DB.
+export interface SummaryCommentStore {
+  getSummaryCommentId(prKey: string): number | undefined;
+  setSummaryCommentId(prKey: string, commentId: number): void;
+}
+
 // Accept `sqlite:./path.db`, `sqlite:///abs/path.db`, a bare path, or default.
 // Only sqlite is implemented; a postgres/redis URL is rejected loudly rather
 // than silently mis-handled.
@@ -27,7 +34,7 @@ function resolveDbPath(databaseUrl: string | undefined): string {
   return databaseUrl;
 }
 
-export class SqliteDedupStore implements DedupStore {
+export class SqliteDedupStore implements DedupStore, SummaryCommentStore {
   #db: DatabaseSync;
 
   constructor(databaseUrl = process.env.DATABASE_URL) {
@@ -37,6 +44,9 @@ export class SqliteDedupStore implements DedupStore {
     this.#db.exec(
       'CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, claimed_at INTEGER NOT NULL)',
     );
+    this.#db.exec(
+      'CREATE TABLE IF NOT EXISTS pr_summaries (pr_key TEXT PRIMARY KEY, comment_id INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
+    );
   }
 
   claim(deliveryId: string): boolean {
@@ -45,12 +55,36 @@ export class SqliteDedupStore implements DedupStore {
       .run(deliveryId, Date.now());
     return result.changes === 1;
   }
+
+  getSummaryCommentId(prKey: string): number | undefined {
+    const row = this.#db
+      .prepare('SELECT comment_id FROM pr_summaries WHERE pr_key = ?')
+      .get(prKey) as { comment_id: number | bigint } | undefined;
+    return row ? Number(row.comment_id) : undefined;
+  }
+
+  setSummaryCommentId(prKey: string, commentId: number): void {
+    this.#db
+      .prepare(
+        `INSERT INTO pr_summaries (pr_key, comment_id, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(pr_key) DO UPDATE SET comment_id = excluded.comment_id, updated_at = excluded.updated_at`,
+      )
+      .run(prKey, commentId, Date.now());
+  }
 }
 
-let store: DedupStore | undefined;
+let store: SqliteDedupStore | undefined;
 
-// Process-wide store, created lazily on first use (no DB file until a real event).
-export function getDedupStore(): DedupStore {
+function getStore(): SqliteDedupStore {
+  // Process-wide store, created lazily on first use (no DB file until a real event).
   store ??= new SqliteDedupStore();
   return store;
+}
+
+export function getDedupStore(): DedupStore {
+  return getStore();
+}
+
+export function getSummaryCommentStore(): SummaryCommentStore {
+  return getStore();
 }

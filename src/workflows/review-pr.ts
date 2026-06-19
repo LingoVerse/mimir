@@ -2,6 +2,7 @@ import { type FlueContext, type WorkflowRouteHandler, createAgent } from '@flue/
 import { type PrDiff, fetchPrDiff } from '../lib/diff.ts';
 import { decideEscalation } from '../lib/escalation.ts';
 import { client } from '../lib/github.ts';
+import { postReview } from '../lib/post-review.ts';
 import { ReviewResultSchema } from '../lib/review.ts';
 import { touchesSensitivePath } from '../lib/security-paths.ts';
 import reviewRubric from '../skills/review-rubric/SKILL.md' with { type: 'skill' };
@@ -99,6 +100,18 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     ).data;
   }
 
+  // 5. Post: one summary comment (updated on re-review) + inline comments.
+  const posted = await postReview(payload, review, {
+    escalated: decision.escalate,
+    reasons: decision.reasons,
+    truncatedOmitted: diff.truncated?.omitted.length,
+  });
+  log.info('review posted', {
+    summaryCommentId: posted.summaryCommentId,
+    summaryUpdated: posted.summaryUpdated,
+    inlinePosted: posted.inlinePosted,
+  });
+
   return {
     pr: payload,
     securitySensitive,
@@ -109,6 +122,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
       totalChangedLines: diff.totalChangedLines,
       truncated: diff.truncated,
     },
+    posted,
     review,
   };
 }

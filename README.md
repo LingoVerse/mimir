@@ -36,8 +36,8 @@ src/
   skills/
     review-rubric/SKILL.md    security-check/SKILL.md                    (Phase 3 ✓)
   lib/
-    github.ts diff.ts dedup.ts review.ts security-paths.ts escalation.ts (Phase 1–4 ✓)
-    post-review.ts                                                        (Phase 5)
+    github.ts diff.ts dedup.ts review.ts security-paths.ts               (Phase 1–3 ✓)
+    escalation.ts  post-review.ts                                        (Phase 4–5 ✓)
 flue.config.ts    # target: 'node'
 ```
 
@@ -89,7 +89,15 @@ Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`
   double-checking critical claims (§5.4). Every decision + reasons is logged via `ctx.log.info`
   (visible in `flue logs`). Decision logic unit-tested (6 cases, 13 total). Live escalation pass
   needs creds (Phase 6 smoke), same as the primary pass.
-- Phases 5–6 (posting, deploy) not yet started.
+- **Phase 5 — posting: done.** `lib/post-review.ts` posts one issue-level summary comment
+  (verdict + severity counts + escalation/truncation notes + line-less "general" findings) and
+  inline comments via the PR review API (`pulls.createReview`, one batched review) — the two API
+  paths kept distinct (§6). Nits suppressed unless `POST_NITS=true`. **Idempotent on `synchronize`:**
+  the summary comment id is stored per-PR in SQLite (`pr_summaries` table) and updated on re-review
+  instead of stacking; inline failures (a line not in the diff → 422) degrade to a warning so the
+  summary still posts. Pure helpers + store idempotency unit-tested (17 total). Live posting needs
+  creds (Phase 6 smoke).
+- Phase 6 (deploy) not yet started.
 
 ### Verified against live docs (build-spec §0 gates)
 

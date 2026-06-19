@@ -13,3 +13,14 @@ test('rejects non-sqlite DATABASE_URL schemes', () => {
   assert.throws(() => new SqliteDedupStore('postgres://localhost/db'), /sqlite only/);
   assert.throws(() => new SqliteDedupStore('redis://localhost:6379'), /sqlite only/);
 });
+
+test('summary comment id: absent, then create-once, then update', () => {
+  const store = new SqliteDedupStore(':memory:');
+  const pr = 'octo/repo#7';
+  assert.equal(store.getSummaryCommentId(pr), undefined); // first review -> create
+  store.setSummaryCommentId(pr, 111);
+  assert.equal(store.getSummaryCommentId(pr), 111); // synchronize -> update this id
+  store.setSummaryCommentId(pr, 222); // upsert overwrites
+  assert.equal(store.getSummaryCommentId(pr), 222);
+  assert.equal(store.getSummaryCommentId('octo/repo#8'), undefined); // distinct PR
+});
