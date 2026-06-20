@@ -16,6 +16,9 @@ for the consumer Gemini Code Assist GitHub reviewer.
 GitHub webhook
   → verify signature + dedup delivery        (channels/github.ts)
   → fetch & chunk diff, skip generated/vendored   (lib/diff.ts)
+  → load project context: the repo's own conventions/memory from the base branch,
+      + read-only repo tools so the model can pull related code the diff omits
+      (lib/project-context.ts, lib/repo-tools.ts)
   → primary review on a cheap model               (workflows/review-pr.ts + skills/)
       rubric always; security-check on sensitive paths
   → escalate to a stronger model when the diff is  (lib/escalation.ts)
@@ -64,7 +67,8 @@ src/
   workflows/review-pr.ts  resolve PR → diff → skills → primary → escalate → post
   skills/                 review-rubric, security-check  (Agent Skills, bundled)
   lib/                    github, diff, dedup, review, security-paths,
-                          escalation, post-review, env
+                          escalation, post-review, env,
+                          project-context, repo-tools   (context beyond the diff)
 ```
 
 Workflows and channels are discovered by flat filename in their dirs; everything else is `lib/`.
@@ -87,6 +91,11 @@ Tests run under `node --test` (matching the Node runtime, where `node:sqlite` is
   stronger model and replaces the result (also double-checking critical claims).
 - **Idempotency.** Webhook deliveries are claimed in SQLite (replays skipped); the summary
   comment id is stored so a re-push updates one comment instead of stacking new ones.
+- **Context beyond the diff.** The reviewer reads the project's own agent-guidance
+  (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `.mimir/memory/*`) from the
+  base branch, and has read-only, repo-scoped tools (`read_repo_file`, `list_repo_dir`,
+  `search_repo`) to pull related code a diff can't show. Read-only; untrusted PR code is never
+  executed. (Writing memory back into the PR is a separate, maintainer-gated step — planned.)
 
 ## Non-goals
 

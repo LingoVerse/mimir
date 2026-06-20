@@ -3,6 +3,8 @@ import { type PrDiff, fetchPrDiff } from '../lib/diff.ts';
 import { decideEscalation } from '../lib/escalation.ts';
 import { client } from '../lib/github.ts';
 import { postReview } from '../lib/post-review.ts';
+import { fetchProjectContext } from '../lib/project-context.ts';
+import { repoContextTools } from '../lib/repo-tools.ts';
 import { ReviewResultSchema } from '../lib/review.ts';
 import { touchesSensitivePath } from '../lib/security-paths.ts';
 import reviewRubric from '../skills/review-rubric/SKILL.md' with { type: 'skill' };
@@ -15,6 +17,8 @@ export interface ReviewPayload {
   repo: string;
   number: number;
   headSha: string;
+  // Base branch — project context (conventions/memory) is read from here (trusted).
+  baseRef: string;
 }
 
 // Env-configured model tiers (OpenRouter slugs) so swapping is a config change.
@@ -45,13 +49,22 @@ function renderDiff(diff: PrDiff): string {
 
 // Shared instruction for both the primary and escalation passes (same rubric,
 // different model). The skills enforce restraint, so the prompt only frames it.
-function buildInstruction(payload: ReviewPayload, diff: PrDiff, securitySensitive: boolean): string {
+function buildInstruction(
+  payload: ReviewPayload,
+  diff: PrDiff,
+  securitySensitive: boolean,
+  projectContext: string,
+): string {
   return [
     'Review this pull-request diff. Apply the `review-rubric` skill to produce your findings.',
     securitySensitive
       ? 'This diff changes security-sensitive paths — also apply the `security-check` skill and merge its findings.'
       : null,
-    `Pull request: ${payload.owner}/${payload.repo}#${payload.number} @ ${payload.headSha}`,
+    'You may call `read_repo_file`, `list_repo_dir`, and `search_repo` to pull in code the diff does not show (callers, schemas, related modules) — use them only when a finding depends on context outside the diff.',
+    projectContext
+      ? `\n## Project context — the project's own conventions/memory; honour these\n${projectContext}`
+      : null,
+    `\nPull request: ${payload.owner}/${payload.repo}#${payload.number} @ ${payload.headSha}`,
     '',
     renderDiff(diff),
   ]
@@ -60,15 +73,28 @@ function buildInstruction(payload: ReviewPayload, diff: PrDiff, securitySensitiv
 }
 
 export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
-  // 1. Fetch + chunk the diff (generated/vendored paths already filtered).
+  // 1. Fetch the diff + the project's own conventions/memory (from the base ref).
   const diff = await fetchPrDiff(client, payload);
   const securitySensitive = touchesSensitivePath(diff.files.map((f) => f.filename));
-  const instruction = buildInstruction(payload, diff, securitySensitive);
+  const projectContext = await fetchProjectContext(client, {
+    owner: payload.owner,
+    repo: payload.repo,
+    ref: payload.baseRef,
+  });
+  const instruction = buildInstruction(payload, diff, securitySensitive, projectContext);
+
+  // Read-only repo tools scoped to the PR head, so the model can pull related
+  // code the diff omits. Available to both passes.
+  const tools = repoContextTools(client, {
+    owner: payload.owner,
+    repo: payload.repo,
+    ref: payload.headSha,
+  });
 
   // 2. Primary pass on MODEL_PRIMARY.
   const harness = await init(reviewer);
   const primary = (
-    await (await harness.session()).prompt(instruction, { result: ReviewResultSchema })
+    await (await harness.session()).prompt(instruction, { result: ReviewResultSchema, tools })
   ).data;
 
   // 3. Escalation decision (§5). Logged for cost/escalation-rate observability.
@@ -96,6 +122,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
       await escalationSession.prompt(instruction, {
         result: ReviewResultSchema,
         model: ESCALATION_MODEL,
+        tools,
       })
     ).data;
   }

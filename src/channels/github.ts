@@ -4,9 +4,9 @@ import { getDedupStore } from '../lib/dedup.ts';
 import { validateEnv } from '../lib/env.ts';
 import type { ReviewPayload } from '../workflows/review-pr.ts';
 
-// Fail fast at server startup: Flue loads channels on boot, so a missing secret
-// surfaces here with a clear message instead of crashing mid-review. (Not run by
-// `flue build`, which only bundles, or by `flue run`, which loads workflows.)
+// Fail fast at startup: Flue loads channels on boot (and for `flue run`), so a
+// missing secret surfaces here with a clear message instead of crashing
+// mid-review. `flue build` only bundles, so it does not run this.
 try {
   validateEnv();
 } catch (err) {
@@ -56,6 +56,7 @@ export const channel = createGitHubChannel({
         repo: repository.name,
         number: pull_request.number,
         headSha: pull_request.head.sha,
+        baseRef: pull_request.base.ref,
       });
       return;
     }
