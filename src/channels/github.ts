@@ -1,7 +1,18 @@
 // flue-blueprint: channel/github@1
 import { createGitHubChannel } from '@flue/github';
 import { getDedupStore } from '../lib/dedup.ts';
+import { validateEnv } from '../lib/env.ts';
 import type { ReviewPayload } from '../workflows/review-pr.ts';
+
+// Fail fast at server startup: Flue loads channels on boot, so a missing secret
+// surfaces here with a clear message instead of crashing mid-review. (Not run by
+// `flue build`, which only bundles, or by `flue run`, which loads workflows.)
+try {
+  validateEnv();
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
 
 // PR actions that trigger a review. Subscribe to `pull_request` (these actions)
 // in the GitHub webhook config; content type must be application/json.

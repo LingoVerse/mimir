@@ -1,148 +1,93 @@
-# Mimir — PR Review Agent
+# Mimir
 
-A standalone [Flue](https://flueframework.com) agent that reviews GitHub pull requests:
-fetch the diff, review it against a markdown rubric, post a summary comment + inline line
-comments. Read-only on code — it comments; humans decide. Model-agnostic via OpenRouter,
-dual-model (cheap primary pass → escalate to a stronger model on hard diffs).
+Self-hosted GitHub **pull-request reviewer**. On each PR, Mimir fetches the diff, reviews it
+against a markdown rubric (with a deeper security pass on sensitive changes), escalates hard
+diffs to a stronger model, and posts a **summary comment + inline comments**. Read-only on
+code — it comments, humans decide. Model-agnostic via **OpenRouter**; a drop-in replacement
+for the consumer Gemini Code Assist GitHub reviewer.
 
-Replacement for the consumer Gemini Code Assist GitHub reviewer (shutdown 2026-07-17).
+> *Mimir* — in Norse myth, the wise severed head Odin consults before every decision. A
+> reviewer is the counsel you consult before merging; and a head with no body is *headless*,
+> which is how Flue describes itself. The name is the architecture.
 
-## Toolchain
-
-- **Bun is the package manager + script runner; the runtime is Node.** Flue's minimum is
-  Node `>=22.19.0`. We use `bun install` / `bun run`, but `flue` itself runs under **Node**:
-  the `flue` bin is `#!/usr/bin/env node`, so `bun run dev/build` dispatches it to Node.
-  **Deploy target is `node`** (`flue.config.ts` → `target: 'node'`).
-- **Bun cannot run Flue as a runtime (verified empirically).** A Bun-only Docker image
-  (`oven/bun`, no real Node) fails `flue build --target node` with
-  `SyntaxError: Export named 'registerHooks' not found in module 'node:module'` — `@flue/cli`
-  needs Node's `node:module.registerHooks`, which Bun 1.3.14 lacks. So building/serving under
-  Bun-only is not possible today; this is why dedup uses `node:sqlite` (not `bun:sqlite`).
-- **Native postinstalls:** Bun blocks lifecycle scripts of three native transitive deps of
-  `@flue/runtime` (`node-liblzma`, `@mongodb-js/zstd`, `protobufjs`). They never bit through
-  Phase 2 (`flue build`/`dev` run the server under Node, which ships prebuilt binaries).
-
-## Project layout
-
-Flue resolves its source-discovery root as `.flue/` → `src/` → project root (Configuration
-ref). We use `src/`, so the build-spec layout holds:
+## How it works
 
 ```
-src/
-  channels/
-    github.ts     # verified webhook ingress; dedup + admit review run  (Phase 1–3 ✓)
-  workflows/
-    review-pr.ts  # resolve PR → diff → skills → primary pass (struct.)  (Phase 3 ✓)
-  skills/
-    review-rubric/SKILL.md    security-check/SKILL.md                    (Phase 3 ✓)
-  lib/
-    github.ts diff.ts dedup.ts review.ts security-paths.ts               (Phase 1–3 ✓)
-    escalation.ts  post-review.ts                                        (Phase 4–5 ✓)
-flue.config.ts    # target: 'node'
+GitHub webhook
+  → verify signature + dedup delivery        (channels/github.ts)
+  → fetch & chunk diff, skip generated/vendored   (lib/diff.ts)
+  → primary review on a cheap model               (workflows/review-pr.ts + skills/)
+      rubric always; security-check on sensitive paths
+  → escalate to a stronger model when the diff is  (lib/escalation.ts)
+      big / security-sensitive / low-confidence / has a critical finding
+  → post summary + inline comments, idempotently   (lib/post-review.ts)
 ```
 
-No `src/app.ts`: `openrouter` is a **built-in** Flue provider (no `registerProvider`
-needed — just `OPENROUTER_API_KEY`), and without `app.ts` Flue auto-mounts its routes at
-`/` and discovers `channels/github.ts` → `POST /channels/github/webhook`. Add `app.ts`
-only later if a custom route is needed (e.g. `/health` for deploy).
+Built on **Flue** (Node runtime), **OpenRouter** (LLM gateway), **octokit** (GitHub API),
+and **SQLite** (delivery dedup + summary-comment tracking).
 
-Workflows and channels are discovered by flat filename inside their dirs; keep those dirs
-flat (nested files are not discovered). Everything else goes under `src/lib/`.
-
-## Setup
+## Quick start (local)
 
 ```bash
 bun install
-cp .env.example .env   # fill in OpenRouter + GitHub secrets
+cp .env.example .env     # fill OPENROUTER_API_KEY, GITHUB_WEBHOOK_SECRET, GITHUB_TOKEN
+bun run dev              # flue dev server on :3583
 ```
 
-Scripts: `bun run dev` (flue watch server), `bun run build`, `bun run typecheck`,
-`bun run test` (node --test), `bun run lint`, `bun run format`.
+Expose it (e.g. an `ngrok`/`cloudflared` tunnel) and point a GitHub webhook at
+`/channels/github/webhook`. Full setup — generating the webhook secret, token scopes, and
+production deploy — is in **[DEPLOY.md](DEPLOY.md)**.
 
-## Deploy (Docker → Node)
+## Configuration
 
-The image is **Node-based** (Node 24): `flue build` needs Node's `node:module.registerHooks`,
-which Bun lacks, so Bun is only the package manager — `flue` runs under Node via its bin shebang.
-Multi-stage `Dockerfile`: build (`bun install` + `flue build`) → production deps → Node-only
-runtime (non-root, listens on `PORT`/3000, binds `0.0.0.0`, healthcheck). SQLite (dedup +
-summary-comment ids) lives on the `/data` volume (`DATABASE_URL=sqlite:/data/mimir.db`).
+All model selection is env, so swapping models is a config change. The app **validates env at
+startup** and refuses to boot if a required var is missing or malformed.
+
+| Var | Required | Default | Purpose |
+| --- | :---: | --- | --- |
+| `OPENROUTER_API_KEY` | ✅ | — | LLM access (all models via OpenRouter) |
+| `GITHUB_WEBHOOK_SECRET` | ✅ | — | verify inbound webhook signatures |
+| `GITHUB_TOKEN` | ✅ | — | read the diff + post comments |
+| `MODEL_PRIMARY` | | `openrouter/z-ai/glm-5.2` | cheap pass, runs on every PR |
+| `MODEL_ESCALATION` | | `openrouter/google/gemini-flash-3` | stronger pass on hard diffs |
+| `ESCALATION_DIFF_THRESHOLD` | | `400` | changed-lines trigger for escalation |
+| `DIFF_MAX_TOKENS` | | `60000` | diff token budget (largest-change files kept) |
+| `POST_NITS` | | `false` | also post `nit`-severity comments |
+| `DATABASE_URL` | | `./data/mimir.db` | sqlite path (`sqlite:<path>` or a bare path) |
+| `INTERNAL_BASE_URL` | | request origin | loopback used to admit review runs behind a proxy |
+
+## Project layout
+
+```
+src/
+  channels/github.ts      verified webhook ingress; dedup + admit a review run
+  workflows/review-pr.ts  resolve PR → diff → skills → primary → escalate → post
+  skills/                 review-rubric, security-check  (Agent Skills, bundled)
+  lib/                    github, diff, dedup, review, security-paths,
+                          escalation, post-review, env
+```
+
+Workflows and channels are discovered by flat filename in their dirs; everything else is `lib/`.
+
+## Development
 
 ```bash
-docker compose up -d --build        # or: docker build -t mimir . && docker run ...
+bun run dev | build | typecheck | test | lint | format
 ```
 
-Supply secrets at **runtime** (the built server does not read `.env`): set
-`OPENROUTER_API_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`, `MODEL_PRIMARY/ESCALATION` via
-the compose `env_file` or Dokploy's env UI. Point the GitHub webhook (content-type
-`application/json`) at `https://<host>/channels/github/webhook`.
+Tests run under `node --test` (matching the Node runtime, where `node:sqlite` is available).
 
-## Status
+## Design notes
 
-- **Phase 0 — scaffold: done.** Flue project initialized (`@flue/runtime@1.0.0-beta.2`,
-  `@flue/cli@1.0.0-beta.1`), Bun toolchain, TS (`tsc --noEmit`) + oxlint/oxfmt, `.env.example`.
-- **Phase 1 — provider + channel: done.** `openrouter` confirmed built-in (no provider code);
-  `@flue/github` + `@octokit/rest@22.0.1` installed; `channels/github.ts` verifies webhooks and
-  admits PR events fast; `review-pr` workflow skeleton added so the app boots. Live-tested
-  against `flue dev`: valid ping → **200 in ~17ms**, bad signature → **401**, `pull_request`
-  opened → **200 in ~3ms** (hits the review seam), form-encoded → **415** (JSON-only).
-- **Phase 2 — dedup + diff: done.** `lib/dedup.ts` claims `deliveryId` in SQLite (`node:sqlite`,
-  zero native deps) and is wired into the channel before any work; `lib/diff.ts` fetches the
-  per-file diff via octokit, drops generated/vendored paths, and caps to a token budget
-  (largest-change files first, truncation reported). Unit tests via `node --test` (5 pass) and a
-  live replay check: same `deliveryId` twice → second skipped; distinct id → reviewed.
-- **Phase 3 — review workflow: done.** `review-pr` resolves the PR from the payload, fetches the
-  diff, loads skills (`review-rubric` always; `security-check` when `lib/security-paths.ts` flags a
-  sensitive surface), and runs a primary pass on `MODEL_PRIMARY` with a valibot-validated result
-  (`summary/verdict/confidence/findings`, `lib/review.ts`). Skills are app-owned under
-  `src/skills/` and imported with `… with { type: 'skill' }`. The channel claims the delivery then
-  admits a durable run via `POST /workflows/review-pr`. Verified: `flue run review-pr` runs to the
-  diff fetch (401 on dummy token — pipeline wired); a signed `pull_request` → webhook **200/45ms**
-  + admitted `runId`. **Not yet exercised:** the live LLM pass (needs a real `OPENROUTER_API_KEY`
-  + PR — Phase 6 smoke).
-- **Phase 4 — dual-model escalation: done.** `lib/escalation.ts` escalates to `MODEL_ESCALATION`
-  when ANY of §5 fires: diff > `ESCALATION_DIFF_THRESHOLD` (400), security-sensitive path, primary
-  `confidence: low`, or a `critical` finding. On escalation the workflow re-reviews the whole diff
-  on the stronger model (independent session, per-prompt `model` override) and replaces the result,
-  double-checking critical claims (§5.4). Every decision + reasons is logged via `ctx.log.info`
-  (visible in `flue logs`). Decision logic unit-tested (6 cases, 13 total). Live escalation pass
-  needs creds (Phase 6 smoke), same as the primary pass.
-- **Phase 5 — posting: done.** `lib/post-review.ts` posts one issue-level summary comment
-  (verdict + severity counts + escalation/truncation notes + line-less "general" findings) and
-  inline comments via the PR review API (`pulls.createReview`, one batched review) — the two API
-  paths kept distinct (§6). Nits suppressed unless `POST_NITS=true`. **Idempotent on `synchronize`:**
-  the summary comment id is stored per-PR in SQLite (`pr_summaries` table) and updated on re-review
-  instead of stacking; inline failures (a line not in the diff → 422) degrade to a warning so the
-  summary still posts. Pure helpers + store idempotency unit-tested (17 total). Live posting needs
-  creds (Phase 6 smoke).
-- **Phase 6 — deploy: done.** Multi-stage `Dockerfile` (Node 24, non-root) + `.dockerignore` +
-  `docker-compose.yml`. Verified empirically: image builds (`flue build` runs under Node in the
-  container), boots binding `0.0.0.0:3000`, signed ping → **200** from host and in-container,
-  `HEALTHCHECK` → **healthy**. SQLite persists on the `/data` volume. The remaining live check is
-  §11 against a real repo PR (needs real `OPENROUTER_API_KEY` + `GITHUB_TOKEN` + a webhook).
-- **Phase 7 — repo context ("project embedding" foundation): designed, not built.** Verified the
-  Flue gates: read-only repo tools (`defineTool`, scoped to `{owner,repo,headSha}`) are the safe
-  path; Flue has **no runtime skill-content registration**, and loading the PR head's `.agents/skills/`
-  is a prompt-injection vector — so project conventions must be fetched from the **base branch** and
-  injected as prompt context. Implementation pending.
+- **Node runtime, not Bun.** Flue's CLI needs `node:module.registerHooks`, which Bun lacks;
+  Bun is only the package manager (flue runs under Node via its bin shebang). Deploy is Node.
+- **OpenRouter is a built-in Flue provider** — no registration code, just `OPENROUTER_API_KEY`;
+  specifiers look like `openrouter/<vendor>/<model>`.
+- **Dual-model.** Every PR gets the cheap pass; escalation re-reviews the whole diff on the
+  stronger model and replaces the result (also double-checking critical claims).
+- **Idempotency.** Webhook deliveries are claimed in SQLite (replays skipped); the summary
+  comment id is stored so a re-push updates one comment instead of stacking new ones.
 
-### Verified against live docs (build-spec §0 gates)
+## Non-goals
 
-- `flue init --target node` is the real init command; CLI surface confirmed via `flue --help`.
-- Model layer is **Pi** (`pi.dev`); model specifier is `provider-id/model-id`. `openrouter` is a
-  **built-in provider** (env `OPENROUTER_API_KEY`) — the spec's §4 `registerProvider` + Hono
-  `app.ts` is unnecessary.
-- Provider ID splits on the **first** slash: `openrouter/z-ai/glm-5.2` → provider `openrouter`,
-  model `z-ai/glm-5.2` (models-doc table) — no alias map needed (resolves build-spec §4 gate).
-- Source-discovery root rule (`.flue/` → `src/` → root) confirms the `src/` layout.
-- GitHub channel API confirmed via `flue add channel github` blueprint: `createGitHubChannel`,
-  path `/channels/github/webhook`, `delivery.{name,payload,deliveryId}`, outbound auth via
-  `GITHUB_TOKEN` (renamed from the spec's `GITHUB_APP_TOKEN`).
-- Workflows export `run(ctx)` + optional `route`; admit via `flue run` or `POST /workflows/<name>`
-  → `202 { runId }`. A channel must **not** call `run()` directly — it admits through the route.
-- Skills: app-owned under `src/skills/<name>/SKILL.md`, imported with `with { type: 'skill' }` and
-  passed to `createAgent({ skills })`; `name` frontmatter must equal the dir. (The `.agents/skills/`
-  path is for *workspace-discovered* skills only.) Structured output uses **valibot** schemas
-  (`session.prompt(text, { result })` → validated `response.data`).
-- Channel handler receives `{ c, delivery }` (Hono context); ping is auto-handled by the channel.
-  No programmatic workflow-admit API exists, so the channel POSTs the mounted workflow route
-  (`INTERNAL_BASE_URL` pins the loopback in prod).
+No auto-fix, no auto-merge, no auto-approve — comments only.
