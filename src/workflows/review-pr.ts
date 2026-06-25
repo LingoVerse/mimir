@@ -1,7 +1,8 @@
 import { type FlueContext, type WorkflowRouteHandler, createAgent } from '@flue/runtime';
-import { type PrDiff, fetchPrDiff } from '../lib/diff.ts';
+import { fetchPrDiff } from '../lib/diff.ts';
 import { decideEscalation } from '../lib/escalation.ts';
 import { client } from '../lib/github.ts';
+import { type ReviewPayload, buildInstruction } from '../lib/instruction.ts';
 import { postReview } from '../lib/post-review.ts';
 import { fetchProjectContext } from '../lib/project-context.ts';
 import { repoContextTools } from '../lib/repo-tools.ts';
@@ -10,16 +11,10 @@ import { touchesSensitivePath } from '../lib/security-paths.ts';
 import reviewRubric from '../skills/review-rubric/SKILL.md' with { type: 'skill' };
 import securityCheck from '../skills/security-check/SKILL.md' with { type: 'skill' };
 
-// PR coordinates passed by the GitHub channel when it admits a review run
-// (resolved from the webhook payload, not re-fetched).
-export interface ReviewPayload {
-  owner: string;
-  repo: string;
-  number: number;
-  headSha: string;
-  // Base branch — project context (conventions/memory) is read from here (trusted).
-  baseRef: string;
-}
+// PR coordinates passed by the GitHub channel when it admits a review run.
+// Defined in ../lib/instruction.ts (with buildInstruction); re-exported here for
+// existing importers (the github channel).
+export type { ReviewPayload } from '../lib/instruction.ts';
 
 // Env-configured model tiers (OpenRouter slugs) so swapping is a config change.
 const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? 'openrouter/z-ai/glm-5.2';
@@ -31,46 +26,6 @@ const reviewer = createAgent(() => ({
   model: PRIMARY_MODEL,
   skills: [reviewRubric, securityCheck],
 }));
-
-// Render the chunked diff as a single text block for the model.
-function renderDiff(diff: PrDiff): string {
-  const parts = diff.files.map((f) => {
-    const rename = f.previousFilename ? ` (was ${f.previousFilename})` : '';
-    const header = `### ${f.filename}${rename} — ${f.status}, +${f.additions} -${f.deletions}`;
-    return f.patch ? `${header}\n\n${f.patch}` : `${header}\n\n(no textual patch: binary or too large)`;
-  });
-  if (diff.truncated) {
-    parts.push(
-      `\n_Diff truncated to fit the token budget; ${diff.truncated.omitted.length} lower-impact file(s) omitted: ${diff.truncated.omitted.join(', ')}._`,
-    );
-  }
-  return parts.join('\n\n');
-}
-
-// Shared instruction for both the primary and escalation passes (same rubric,
-// different model). The skills enforce restraint, so the prompt only frames it.
-function buildInstruction(
-  payload: ReviewPayload,
-  diff: PrDiff,
-  securitySensitive: boolean,
-  projectContext: string,
-): string {
-  return [
-    'Review this pull-request diff. Apply the `review-rubric` skill to produce your findings.',
-    securitySensitive
-      ? 'This diff changes security-sensitive paths — also apply the `security-check` skill and merge its findings.'
-      : null,
-    'You may call `read_repo_file`, `list_repo_dir`, and `search_repo` to pull in code the diff does not show (callers, schemas, related modules) — use them only when a finding depends on context outside the diff.',
-    projectContext
-      ? `\n## Project context — the project's own conventions/memory; honour these\n${projectContext}`
-      : null,
-    `\nPull request: ${payload.owner}/${payload.repo}#${payload.number} @ ${payload.headSha}`,
-    '',
-    renderDiff(diff),
-  ]
-    .filter((line): line is string => line !== null)
-    .join('\n');
-}
 
 export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   // 1. Fetch the diff + the project's own conventions/memory (from the base ref).
