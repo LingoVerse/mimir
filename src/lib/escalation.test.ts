@@ -59,3 +59,40 @@ test('multiple triggers accumulate', () => {
   assert.equal(d.escalate, true);
   assert.equal(d.reasons.length, 3);
 });
+
+test('ESCALATE_SECURITY_ALWAYS=true: security path always escalates regardless of findings', () => {
+  process.env.ESCALATE_SECURITY_ALWAYS = 'true';
+  try {
+    const d = decideEscalation({ totalChangedLines: 5, securitySensitive: true, review: review() });
+    assert.deepEqual(d.reasons, ['security-sensitive-path']);
+  } finally {
+    delete process.env.ESCALATE_SECURITY_ALWAYS;
+  }
+});
+
+test('ESCALATE_SECURITY_ALWAYS=false: clean security-sensitive PR does not escalate', () => {
+  process.env.ESCALATE_SECURITY_ALWAYS = 'false';
+  try {
+    const d = decideEscalation({ totalChangedLines: 5, securitySensitive: true, review: review() });
+    assert.equal(d.escalate, false);
+    assert.deepEqual(d.reasons, []);
+  } finally {
+    delete process.env.ESCALATE_SECURITY_ALWAYS;
+  }
+});
+
+test('ESCALATE_SECURITY_ALWAYS=false: security path with major finding still escalates', () => {
+  process.env.ESCALATE_SECURITY_ALWAYS = 'false';
+  try {
+    const d = decideEscalation({
+      totalChangedLines: 5,
+      securitySensitive: true,
+      review: review({
+        findings: [{ file: 'migrations/001.sql', severity: 'major', title: 't', body: 'b' }],
+      }),
+    });
+    assert.deepEqual(d.reasons, ['security-sensitive-path']);
+  } finally {
+    delete process.env.ESCALATE_SECURITY_ALWAYS;
+  }
+});

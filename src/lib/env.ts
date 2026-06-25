@@ -22,6 +22,9 @@ const EnvSchema = v.object({
   ESCALATION_DIFF_THRESHOLD: wholeNumber('ESCALATION_DIFF_THRESHOLD'),
   DIFF_MAX_TOKENS: wholeNumber('DIFF_MAX_TOKENS'),
   POST_NITS: v.optional(v.picklist(['true', 'false'], 'POST_NITS must be "true" or "false"')),
+  ESCALATE_SECURITY_ALWAYS: v.optional(
+    v.picklist(['true', 'false'], 'ESCALATE_SECURITY_ALWAYS must be "true" or "false"'),
+  ),
   DATABASE_URL: v.optional(v.string()),
   INTERNAL_BASE_URL: v.optional(v.pipe(v.string(), v.url('INTERNAL_BASE_URL must be a URL'))),
   OPENROUTER_REFERER: v.optional(v.string()),

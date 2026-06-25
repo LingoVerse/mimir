@@ -20,6 +20,10 @@ function diffThreshold(): number {
   return Number.isFinite(n) && n > 0 ? n : 400;
 }
 
+function escalateSecurityAlways(): boolean {
+  return process.env.ESCALATE_SECURITY_ALWAYS !== 'false';
+}
+
 // Decide whether to re-review with the stronger model (build-spec §5). Escalate
 // when ANY trigger fires; collect every matching reason so escalation rate and
 // cause are observable in the run log.
@@ -30,7 +34,10 @@ export function decideEscalation(input: EscalationInput): EscalationDecision {
   if (input.totalChangedLines > threshold) {
     reasons.push(`diff-size>${threshold} (${input.totalChangedLines} lines)`);
   }
-  if (input.securitySensitive) {
+  if (
+    input.securitySensitive &&
+    (escalateSecurityAlways() || input.review.findings.some((f) => f.severity !== 'nit'))
+  ) {
     reasons.push('security-sensitive-path');
   }
   if (input.review.confidence === 'low') {
