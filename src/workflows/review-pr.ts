@@ -93,9 +93,8 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
 
   // 2. Primary pass on MODEL_PRIMARY.
   const harness = await init(reviewer);
-  const primary = (
-    await (await harness.session()).prompt(instruction, { result: ReviewResultSchema, tools })
-  ).data;
+  const primaryResult = await (await harness.session()).prompt(instruction, { result: ReviewResultSchema, tools });
+  const primary = primaryResult.data;
 
   // 3. Escalation decision (§5). Logged for cost/escalation-rate observability.
   const decision = decideEscalation({
@@ -116,15 +115,15 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   //    session) and let the stronger result replace the primary one — this also
   //    double-checks critical claims to cut false positives (§5.4).
   let review = primary;
+  let escalationResult: typeof primaryResult | null = null;
   if (decision.escalate) {
     const escalationSession = await harness.session('escalation');
-    review = (
-      await escalationSession.prompt(instruction, {
-        result: ReviewResultSchema,
-        model: ESCALATION_MODEL,
-        tools,
-      })
-    ).data;
+    escalationResult = await escalationSession.prompt(instruction, {
+      result: ReviewResultSchema,
+      model: ESCALATION_MODEL,
+      tools,
+    });
+    review = escalationResult.data;
   }
 
   // 5. Post: one summary comment (updated on re-review) + inline comments.
@@ -132,6 +131,19 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     escalated: decision.escalate,
     reasons: decision.reasons,
     truncatedOmitted: diff.truncated?.omitted.length,
+  });
+  log.info('review cost', {
+    primaryModel: primaryResult.model.id,
+    primaryInputTokens: primaryResult.usage.input,
+    primaryOutputTokens: primaryResult.usage.output,
+    primaryCostUsd: primaryResult.usage.cost.total,
+    escalated: decision.escalate,
+    escalationModel: escalationResult?.model.id ?? null,
+    escalationInputTokens: escalationResult?.usage.input ?? null,
+    escalationOutputTokens: escalationResult?.usage.output ?? null,
+    escalationCostUsd: escalationResult?.usage.cost.total ?? null,
+    totalTokens: primaryResult.usage.totalTokens + (escalationResult?.usage.totalTokens ?? 0),
+    totalCostUsd: primaryResult.usage.cost.total + (escalationResult?.usage.cost.total ?? 0),
   });
   log.info('review posted', {
     summaryCommentId: posted.summaryCommentId,
