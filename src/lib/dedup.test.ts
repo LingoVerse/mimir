@@ -14,6 +14,18 @@ test('rejects non-sqlite DATABASE_URL schemes', () => {
   assert.throws(() => new SqliteDedupStore('redis://localhost:6379'), /sqlite only/);
 });
 
+test('release: claim → release → claim again returns true', () => {
+  const store = new SqliteDedupStore(':memory:');
+  assert.equal(store.claim('delivery-r1'), true);
+  store.release('delivery-r1');
+  assert.equal(store.claim('delivery-r1'), true); // re-claimable after release
+});
+
+test('release: no-op when id was never claimed', () => {
+  const store = new SqliteDedupStore(':memory:');
+  assert.doesNotThrow(() => store.release('never-claimed'));
+});
+
 test('summary comment id: absent, then create-once, then update', () => {
   const store = new SqliteDedupStore(':memory:');
   const pr = 'octo/repo#7';

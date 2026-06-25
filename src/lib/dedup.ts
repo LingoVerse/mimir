@@ -9,6 +9,9 @@ import { DatabaseSync } from 'node:sqlite';
 export interface DedupStore {
   // Returns true if this deliveryId was newly claimed, false if already seen.
   claim(deliveryId: string): boolean;
+  // Releases a previously claimed deliveryId so it can be re-claimed (e.g. on
+  // admit failure). No-op if the id was never claimed.
+  release(deliveryId: string): void;
 }
 
 // Tracks the per-PR summary comment id so re-reviews (on `synchronize`) update
@@ -54,6 +57,12 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore {
       .prepare('INSERT OR IGNORE INTO deliveries (id, claimed_at) VALUES (?, ?)')
       .run(deliveryId, Date.now());
     return result.changes === 1;
+  }
+
+  release(deliveryId: string): void {
+    this.#db
+      .prepare('DELETE FROM deliveries WHERE id = ?')
+      .run(deliveryId);
   }
 
   getSummaryCommentId(prKey: string): number | undefined {

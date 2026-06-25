@@ -32,7 +32,36 @@ async function admitReview(requestUrl: string, pr: ReviewPayload): Promise<void>
     body: JSON.stringify(pr),
   });
   const body = (await res.json().catch(() => ({}))) as { runId?: string };
+  if (!res.ok) {
+    throw new Error(`[mimir] admit failed with status ${res.status}`);
+  }
   console.log('[mimir] review admitted', { ...pr, status: res.status, runId: body.runId });
+}
+
+// Exported for testing only. Handles one pull_request delivery end-to-end:
+// claims, admits, and releases on failure.
+export async function handlePullRequestDelivery(
+  deps: {
+    claim: (id: string) => boolean;
+    release: (id: string) => void;
+    admit: (requestUrl: string, pr: ReviewPayload) => Promise<void>;
+  },
+  requestUrl: string,
+  deliveryId: string,
+  pr: ReviewPayload,
+): Promise<boolean> {
+  if (!deps.claim(deliveryId)) {
+    console.log('[mimir] duplicate delivery skipped', deliveryId);
+    return false;
+  }
+  try {
+    await deps.admit(requestUrl, pr);
+    return true;
+  } catch (err) {
+    deps.release(deliveryId);
+    console.log('[mimir] admit failed; released claim for retry', deliveryId);
+    throw err;
+  }
 }
 
 export const channel = createGitHubChannel({
@@ -45,19 +74,21 @@ export const channel = createGitHubChannel({
     if (delivery.name === 'pull_request' && REVIEW_ACTIONS.has(delivery.payload.action)) {
       // Idempotency: claim the delivery before any work; skip replays/redeliveries.
       // (A distinct `synchronize` push has its own deliveryId and is not skipped.)
-      if (!getDedupStore().claim(delivery.deliveryId)) {
-        console.log('[mimir] duplicate delivery skipped', delivery.deliveryId);
-        return;
-      }
-
       const { repository, pull_request } = delivery.payload;
-      await admitReview(c.req.url, {
+      const pr: ReviewPayload = {
         owner: repository.owner.login,
         repo: repository.name,
         number: pull_request.number,
         headSha: pull_request.head.sha,
         baseRef: pull_request.base.ref,
-      });
+      };
+      const store = getDedupStore();
+      await handlePullRequestDelivery(
+        { claim: store.claim.bind(store), release: store.release.bind(store), admit: admitReview },
+        c.req.url,
+        delivery.deliveryId,
+        pr,
+      );
       return;
     }
 
