@@ -1,4 +1,4 @@
-import { getSummaryCommentStore } from './dedup.ts';
+import { type SummaryCommentStore, getSummaryCommentStore } from './dedup.ts';
 import { client } from './github.ts';
 import type { Finding, ReviewResult, Severity } from './review.ts';
 
@@ -91,25 +91,45 @@ export async function postReview(
   target: ReviewTarget,
   review: ReviewResult,
   meta: PostMeta,
+  injectedClient = client,
+  injectedStore: SummaryCommentStore = getSummaryCommentStore(),
 ): Promise<PostResult> {
   const { owner, repo, number } = target;
   const postNits = postNitsEnabled();
-  const store = getSummaryCommentStore();
   const prKey = `${owner}/${repo}#${number}`;
   const body = buildSummaryBody(review, meta, postNits);
 
   // Summary comment: update the prior one (idempotent on synchronize) or create.
-  const existing = store.getSummaryCommentId(prKey);
+  const existing = injectedStore.getSummaryCommentId(prKey);
   let summaryCommentId: number;
   let summaryUpdated = false;
   if (existing !== undefined) {
-    await client.rest.issues.updateComment({ owner, repo, comment_id: existing, body });
-    summaryCommentId = existing;
-    summaryUpdated = true;
+    try {
+      await injectedClient.rest.issues.updateComment({ owner, repo, comment_id: existing, body });
+      summaryCommentId = existing;
+      summaryUpdated = true;
+    } catch (err) {
+      if ((err as { status?: number }).status !== 404) throw err;
+      // Stored id is stale (comment was deleted); fall through to create a new one.
+      const res = await injectedClient.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: number,
+        body,
+      });
+      summaryCommentId = res.data.id;
+      injectedStore.setSummaryCommentId(prKey, summaryCommentId);
+      // summaryUpdated stays false: a new comment was created, not updated.
+    }
   } else {
-    const res = await client.rest.issues.createComment({ owner, repo, issue_number: number, body });
+    const res = await injectedClient.rest.issues.createComment({
+      owner,
+      repo,
+      issue_number: number,
+      body,
+    });
     summaryCommentId = res.data.id;
-    store.setSummaryCommentId(prKey, summaryCommentId);
+    injectedStore.setSummaryCommentId(prKey, summaryCommentId);
   }
 
   // Inline comments: findings that carry a diff line, via the PR review API.
@@ -117,7 +137,7 @@ export async function postReview(
   let inlinePosted = 0;
   if (inline.length > 0) {
     try {
-      await client.rest.pulls.createReview({
+      await injectedClient.rest.pulls.createReview({
         owner,
         repo,
         pull_number: number,

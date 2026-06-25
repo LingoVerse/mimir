@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildSummaryBody, visibleFindings } from './post-review.ts';
+import { buildSummaryBody, postReview, visibleFindings } from './post-review.ts';
+import { SqliteDedupStore } from './dedup.ts';
 import type { Finding, ReviewResult } from './review.ts';
 
 const findings: Finding[] = [
@@ -41,4 +42,63 @@ test('summary body: escalation + truncation notes', () => {
   assert.match(body, /Changes requested/);
   assert.match(body, /Escalated to the stronger model \(critical-finding\)/);
   assert.match(body, /2 file\(s\) not reviewed/);
+});
+
+function makeReview(): import('./review.ts').ReviewResult {
+  return { summary: 's', verdict: 'comment', confidence: 'high', findings: [] };
+}
+const target: import('./post-review.ts').ReviewTarget = {
+  owner: 'o', repo: 'r', number: 1, headSha: 'sha1',
+};
+const meta: import('./post-review.ts').PostMeta = { escalated: false, reasons: [] };
+
+test('postReview: no existing id — creates comment and stores id', async () => {
+  const store = new SqliteDedupStore(':memory:');
+  const fakeClient = {
+    rest: { issues: { createComment: async () => ({ data: { id: 42 } }) }, pulls: { createReview: async () => ({}) } },
+  } as never;
+  const result = await postReview(target, makeReview(), meta, fakeClient, store);
+  assert.equal(result.summaryCommentId, 42);
+  assert.equal(result.summaryUpdated, false);
+  assert.equal(store.getSummaryCommentId('o/r#1'), 42);
+});
+
+test('postReview: existing id, update succeeds — summaryUpdated true', async () => {
+  const store = new SqliteDedupStore(':memory:');
+  store.setSummaryCommentId('o/r#1', 99);
+  let updatedId: number | undefined;
+  const fakeClient = {
+    rest: { issues: { updateComment: async ({ comment_id }: { comment_id: number }) => { updatedId = comment_id; } }, pulls: { createReview: async () => ({}) } },
+  } as never;
+  const result = await postReview(target, makeReview(), meta, fakeClient, store);
+  assert.equal(result.summaryCommentId, 99);
+  assert.equal(result.summaryUpdated, true);
+  assert.equal(updatedId, 99);
+});
+
+test('postReview: existing id, update throws 404 — falls back to create, new id stored', async () => {
+  const store = new SqliteDedupStore(':memory:');
+  store.setSummaryCommentId('o/r#1', 99);
+  const fakeClient = {
+    rest: { issues: {
+      updateComment: async () => { const e = new Error('Not Found') as Error & { status: number }; e.status = 404; throw e; },
+      createComment: async () => ({ data: { id: 77 } }),
+    }, pulls: { createReview: async () => ({}) } },
+  } as never;
+  const result = await postReview(target, makeReview(), meta, fakeClient, store);
+  assert.equal(result.summaryCommentId, 77);
+  assert.equal(result.summaryUpdated, false);
+  assert.equal(store.getSummaryCommentId('o/r#1'), 77);
+});
+
+test('postReview: existing id, update throws 500 — error is re-thrown', async () => {
+  const store = new SqliteDedupStore(':memory:');
+  store.setSummaryCommentId('o/r#1', 99);
+  const fakeClient = {
+    rest: { issues: { updateComment: async () => { const e = new Error('Server Error') as Error & { status: number }; e.status = 500; throw e; } }, pulls: { createReview: async () => ({}) } },
+  } as never;
+  await assert.rejects(
+    () => postReview(target, makeReview(), meta, fakeClient, store),
+    (err: unknown) => (err as { status?: number }).status === 500,
+  );
 });
