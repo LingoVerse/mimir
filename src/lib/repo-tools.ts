@@ -10,6 +10,7 @@ export interface RepoRef {
 
 const MAX_FILE_CHARS = 20_000;
 const MAX_SEARCH_RESULTS = 15;
+const DEFAULT_TOOL_BUDGET = 8;
 
 // Reject absolute paths and traversal — the model only addresses paths within
 // the fixed {owner, repo, ref}, never escapes the repo.
@@ -27,6 +28,24 @@ function errMessage(err: unknown): string {
 // the closure — tool parameters only choose paths/queries, never the repo/ref
 // (parameters are not an authorization boundary).
 export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef) {
+  const budget =
+    process.env.REPO_TOOL_CALL_BUDGET !== undefined
+      ? parseInt(process.env.REPO_TOOL_CALL_BUDGET, 10)
+      : DEFAULT_TOOL_BUDGET;
+  let callCount = 0;
+
+  function guardedExecute(toolName: string, arg: string, fn: () => Promise<string>): Promise<string> {
+    callCount += 1;
+    console.log(`[mimir] repo-tool call ${callCount}/${budget}`, { tool: toolName, arg });
+    if (callCount > budget) {
+      console.warn(`[mimir] repo-tool budget exhausted`, { tool: toolName, arg, callCount, budget });
+      return Promise.resolve(
+        `Tool-call budget exhausted (${budget} calls); rely on the diff and findings already gathered.`,
+      );
+    }
+    return fn();
+  }
+
   const readRepoFile = defineTool({
     name: 'read_repo_file',
     description:
@@ -36,18 +55,20 @@ export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef)
     }),
     execute: async ({ path }) => {
       if (!isSafeRepoPath(path)) return `Invalid path: ${path}`;
-      try {
-        const { data } = await client.rest.repos.getContent({ owner, repo, path, ref });
-        if (Array.isArray(data) || data.type !== 'file' || !data.content) {
-          return `Not a readable file: ${path}`;
+      return guardedExecute('read_repo_file', path, async () => {
+        try {
+          const { data } = await client.rest.repos.getContent({ owner, repo, path, ref });
+          if (Array.isArray(data) || data.type !== 'file' || !data.content) {
+            return `Not a readable file: ${path}`;
+          }
+          const text = Buffer.from(data.content, 'base64').toString('utf8');
+          return text.length > MAX_FILE_CHARS
+            ? `${text.slice(0, MAX_FILE_CHARS)}\n… [truncated ${text.length - MAX_FILE_CHARS} chars]`
+            : text;
+        } catch (err) {
+          return `Could not read ${path}: ${errMessage(err)}`;
         }
-        const text = Buffer.from(data.content, 'base64').toString('utf8');
-        return text.length > MAX_FILE_CHARS
-          ? `${text.slice(0, MAX_FILE_CHARS)}\n… [truncated ${text.length - MAX_FILE_CHARS} chars]`
-          : text;
-      } catch (err) {
-        return `Could not read ${path}: ${errMessage(err)}`;
-      }
+      });
     },
   });
 
@@ -60,13 +81,15 @@ export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef)
     execute: async ({ path }) => {
       const dir = path ?? '';
       if (!isSafeRepoPath(dir)) return `Invalid path: ${dir}`;
-      try {
-        const { data } = await client.rest.repos.getContent({ owner, repo, path: dir, ref });
-        if (!Array.isArray(data)) return `Not a directory: ${dir}`;
-        return data.map((e) => `${e.type === 'dir' ? 'dir ' : 'file'} ${e.path}`).join('\n');
-      } catch (err) {
-        return `Could not list ${dir}: ${errMessage(err)}`;
-      }
+      return guardedExecute('list_repo_dir', dir, async () => {
+        try {
+          const { data } = await client.rest.repos.getContent({ owner, repo, path: dir, ref });
+          if (!Array.isArray(data)) return `Not a directory: ${dir}`;
+          return data.map((e) => `${e.type === 'dir' ? 'dir ' : 'file'} ${e.path}`).join('\n');
+        } catch (err) {
+          return `Could not list ${dir}: ${errMessage(err)}`;
+        }
+      });
     },
   });
 
@@ -78,16 +101,18 @@ export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef)
       query: v.pipe(v.string(), v.description('Code search terms, e.g. a function or class name')),
     }),
     execute: async ({ query }) => {
-      try {
-        const { data } = await client.rest.search.code({
-          q: `${query} repo:${owner}/${repo}`,
-          per_page: MAX_SEARCH_RESULTS,
-        });
-        if (data.total_count === 0) return `No matches for: ${query}`;
-        return data.items.map((i) => i.path).join('\n');
-      } catch (err) {
-        return `Search unavailable for "${query}": ${errMessage(err)}`;
-      }
+      return guardedExecute('search_repo', query, async () => {
+        try {
+          const { data } = await client.rest.search.code({
+            q: `${query} repo:${owner}/${repo}`,
+            per_page: MAX_SEARCH_RESULTS,
+          });
+          if (data.total_count === 0) return `No matches for: ${query}`;
+          return data.items.map((i) => i.path).join('\n');
+        } catch (err) {
+          return `Search unavailable for "${query}": ${errMessage(err)}`;
+        }
+      });
     },
   });
 
