@@ -102,3 +102,17 @@ test('postReview: existing id, update throws 500 — error is re-thrown', async 
     (err: unknown) => (err as { status?: number }).status === 500,
   );
 });
+
+test('buildSummaryBody: no fallback section when inlineFallback is empty', () => {
+  const body = buildSummaryBody(review(), { escalated: false, reasons: [] }, false, []);
+  assert.doesNotMatch(body, /couldn't be posted inline/);
+});
+
+test('buildSummaryBody: fallback section lists inline findings when provided', () => {
+  const inlineFallback: Finding[] = [
+    { file: 'a.ts', line: 10, severity: 'critical', title: 'C', body: 'bc' },
+  ];
+  const body = buildSummaryBody(review(), { escalated: false, reasons: [] }, false, inlineFallback);
+  assert.match(body, /### Findings that couldn't be posted inline/);
+  assert.match(body, /\*\*\[critical\] C\*\* \(`a\.ts`, line 10\)/);
+});

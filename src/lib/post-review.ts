@@ -46,6 +46,7 @@ export function buildSummaryBody(
   review: ReviewResult,
   meta: PostMeta,
   postNits = postNitsEnabled(),
+  inlineFallback: Finding[] = [],
 ): string {
   const counts = countBySeverity(review.findings);
   const nitNote = !postNits && counts.nit > 0 ? ' _(suppressed)_' : '';
@@ -66,6 +67,13 @@ export function buildSummaryBody(
     lines.push('', '### General findings');
     for (const f of general) {
       lines.push(`- **[${f.severity}] ${f.title}** (\`${f.file}\`) — ${f.body}`);
+    }
+  }
+
+  if (inlineFallback.length > 0) {
+    lines.push('', "### Findings that couldn't be posted inline");
+    for (const f of inlineFallback) {
+      lines.push(`- **[${f.severity}] ${f.title}** (\`${f.file}\`, line ${f.line}) — ${f.body}`);
     }
   }
 
@@ -97,7 +105,36 @@ export async function postReview(
   const { owner, repo, number } = target;
   const postNits = postNitsEnabled();
   const prKey = `${owner}/${repo}#${number}`;
-  const body = buildSummaryBody(review, meta, postNits);
+
+  // Inline comments FIRST so we know whether they succeeded.
+  const inline = visibleFindings(review.findings, postNits).filter((f) => f.line !== undefined);
+  let inlinePosted = 0;
+  let inlineFallback: Finding[] = [];
+  if (inline.length > 0) {
+    try {
+      await injectedClient.rest.pulls.createReview({
+        owner,
+        repo,
+        pull_number: number,
+        commit_id: target.headSha,
+        event: 'COMMENT',
+        comments: inline.map((f) => ({
+          path: f.file,
+          line: f.line as number,
+          side: 'RIGHT',
+          body: inlineCommentBody(f),
+        })),
+      });
+      inlinePosted = inline.length;
+    } catch (err) {
+      // GitHub 422s the whole review if a line isn't in the diff; forward the
+      // findings into the summary so a critical one never silently vanishes.
+      console.warn('[mimir] inline review failed; forwarding findings to summary:', String(err));
+      inlineFallback = inline;
+    }
+  }
+
+  const body = buildSummaryBody(review, meta, postNits, inlineFallback);
 
   // Summary comment: update the prior one (idempotent on synchronize) or create.
   const existing = injectedStore.getSummaryCommentId(prKey);
@@ -130,32 +167,6 @@ export async function postReview(
     });
     summaryCommentId = res.data.id;
     injectedStore.setSummaryCommentId(prKey, summaryCommentId);
-  }
-
-  // Inline comments: findings that carry a diff line, via the PR review API.
-  const inline = visibleFindings(review.findings, postNits).filter((f) => f.line !== undefined);
-  let inlinePosted = 0;
-  if (inline.length > 0) {
-    try {
-      await injectedClient.rest.pulls.createReview({
-        owner,
-        repo,
-        pull_number: number,
-        commit_id: target.headSha,
-        event: 'COMMENT',
-        comments: inline.map((f) => ({
-          path: f.file,
-          line: f.line as number,
-          side: 'RIGHT',
-          body: inlineCommentBody(f),
-        })),
-      });
-      inlinePosted = inline.length;
-    } catch (err) {
-      // GitHub 422s the whole review if a line isn't in the diff; the summary
-      // (with counts) still posts, so degrade rather than fail the run.
-      console.warn('[mimir] inline review failed; findings remain in summary:', String(err));
-    }
   }
 
   return { summaryCommentId, summaryUpdated, inlinePosted };
