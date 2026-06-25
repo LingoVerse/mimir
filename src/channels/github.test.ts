@@ -9,7 +9,7 @@ process.env.OPENROUTER_API_KEY ??= 'test';
 process.env.GITHUB_WEBHOOK_SECRET ??= 'test';
 process.env.GITHUB_TOKEN ??= 'test';
 
-const { handlePullRequestDelivery } = await import('./github.ts');
+const { handlePullRequestDelivery, resolveAdmitBase } = await import('./github.ts');
 
 const PR: ReviewPayload = {
   owner: 'test-owner',
@@ -63,4 +63,41 @@ test('duplicate delivery: admit NOT called, returns false', async () => {
   const result = await handlePullRequestDelivery(deps, 'http://localhost', 'del-3', PR);
   assert.equal(result, false);
   assert.equal(admitCalls, 0);
+});
+
+test('returns INTERNAL_BASE_URL verbatim when set', () => {
+  assert.strictEqual(
+    resolveAdmitBase('http://127.0.0.1:3000', 'http://example.com/channels/github/webhook'),
+    'http://127.0.0.1:3000',
+  );
+});
+test('loopback origin when unset and request is 127.0.0.1', () => {
+  assert.strictEqual(
+    resolveAdmitBase(undefined, 'http://127.0.0.1:3000/channels/github/webhook'),
+    'http://127.0.0.1:3000',
+  );
+});
+test('loopback origin when unset and request is localhost', () => {
+  assert.strictEqual(
+    resolveAdmitBase(undefined, 'http://localhost:3000/channels/github/webhook'),
+    'http://localhost:3000',
+  );
+});
+test('loopback origin when unset and request is [::1]', () => {
+  assert.strictEqual(
+    resolveAdmitBase(undefined, 'http://[::1]:3000/channels/github/webhook'),
+    'http://[::1]:3000',
+  );
+});
+test('throws when unset and origin is a public host', () => {
+  assert.throws(
+    () => resolveAdmitBase(undefined, 'https://mimir.example.com/channels/github/webhook'),
+    /INTERNAL_BASE_URL is not set.*not loopback/,
+  );
+});
+test('throws when unset and origin is an arbitrary private IP', () => {
+  assert.throws(
+    () => resolveAdmitBase(undefined, 'http://10.0.0.1:3000/channels/github/webhook'),
+    /INTERNAL_BASE_URL is not set.*not loopback/,
+  );
 });

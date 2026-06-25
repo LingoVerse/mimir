@@ -24,8 +24,24 @@ const REVIEW_ACTIONS = new Set(['opened', 'synchronize', 'reopened']);
 // run proceeds durably — the response never blocks on the diff fetch or LLM.
 // INTERNAL_BASE_URL pins the self-call to a loopback in prod (behind a proxy);
 // otherwise the inbound request's own origin is used.
+// Exported for unit testing. Returns a trusted base URL for the internal admit
+// POST. If INTERNAL_BASE_URL is set, it is used verbatim. Otherwise the fallback
+// must be loopback — a non-loopback origin indicates a misconfigured or spoofed
+// Host header and is rejected.
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+export function resolveAdmitBase(internalBaseUrl: string | undefined, requestUrl: string): string {
+  if (internalBaseUrl) return internalBaseUrl;
+  const { origin, hostname } = new URL(requestUrl);
+  if (LOOPBACK_HOSTNAMES.has(hostname.toLowerCase())) return origin;
+  throw new Error(
+    `INTERNAL_BASE_URL is not set and the inbound request origin "${origin}" is not loopback. ` +
+      `Set INTERNAL_BASE_URL=http://127.0.0.1:<port> to fix this.`,
+  );
+}
+
 async function admitReview(requestUrl: string, pr: ReviewPayload): Promise<void> {
-  const base = process.env.INTERNAL_BASE_URL ?? new URL(requestUrl).origin;
+  const base = resolveAdmitBase(process.env.INTERNAL_BASE_URL, requestUrl);
   const res = await fetch(`${base}/workflows/review-pr`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
