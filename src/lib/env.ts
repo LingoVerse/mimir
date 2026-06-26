@@ -29,6 +29,7 @@ const EnvSchema = v.object({
   DATABASE_URL: v.optional(v.string()),
   INTERNAL_BASE_URL: v.optional(v.pipe(v.string(), v.url('INTERNAL_BASE_URL must be a URL'))),
   OPENROUTER_REFERER: v.optional(v.string()),
+  MIMIR_HANDLE: v.optional(v.string()),
 });
 
 export type Env = v.InferOutput<typeof EnvSchema>;

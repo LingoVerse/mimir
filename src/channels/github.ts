@@ -2,6 +2,9 @@
 import { createGitHubChannel } from '@flue/github';
 import { getDedupStore } from '../lib/dedup.ts';
 import { validateEnv } from '../lib/env.ts';
+import { client } from '../lib/github.ts';
+import { hasSkipMarker, isMaintainer, parseRememberCommand } from '../lib/memory.ts';
+import type { RememberPayload } from '../workflows/remember-pr.ts';
 import type { ReviewPayload } from '../workflows/review-pr.ts';
 
 // Fail fast at startup: Flue loads channels on boot (and for `flue run`), so a
@@ -54,6 +57,28 @@ async function admitReview(requestUrl: string, pr: ReviewPayload): Promise<void>
   console.log('[mimir] review admitted', { ...pr, status: res.status, runId: body.runId });
 }
 
+// Admit a durable `remember-pr` run, mirroring admitReview: POST the mounted
+// route (no `?wait`) so the webhook returns fast and curation runs durably.
+async function admitRemember(requestUrl: string, payload: RememberPayload): Promise<void> {
+  const base = resolveAdmitBase(process.env.INTERNAL_BASE_URL, requestUrl);
+  const res = await fetch(`${base}/workflows/remember-pr`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body = (await res.json().catch(() => ({}))) as { runId?: string };
+  if (!res.ok) {
+    throw new Error(`[mimir] remember admit failed with status ${res.status}`);
+  }
+  console.log('[mimir] remember admitted', {
+    owner: payload.owner,
+    repo: payload.repo,
+    prNumber: payload.prNumber,
+    status: res.status,
+    runId: body.runId,
+  });
+}
+
 // Exported for testing only. Handles one pull_request delivery end-to-end:
 // claims, admits, and releases on failure.
 export async function handlePullRequestDelivery(
@@ -88,6 +113,18 @@ export const channel = createGitHubChannel({
   // never block the response on diff fetching or LLM calls.
   async webhook({ c, delivery }) {
     if (delivery.name === 'pull_request' && REVIEW_ACTIONS.has(delivery.payload.action)) {
+      // Loop guard: skip review if the head commit carries a skip marker (e.g. a
+      // memory write-back the bot just pushed, or a human opt-out).
+      const headSha = delivery.payload.pull_request.head.sha;
+      const { data: commit } = await client.rest.repos.getCommit({
+        owner: delivery.payload.repository.owner.login,
+        repo: delivery.payload.repository.name,
+        ref: headSha,
+      });
+      if (hasSkipMarker(commit.commit.message)) {
+        console.log('[mimir] skip-marker detected, not reviewing', headSha);
+        return;
+      }
       // Idempotency: claim the delivery before any work; skip replays/redeliveries.
       // (A distinct `synchronize` push has its own deliveryId and is not skipped.)
       const { repository, pull_request } = delivery.payload;
@@ -105,6 +142,36 @@ export const channel = createGitHubChannel({
         delivery.deliveryId,
         pr,
       );
+      return;
+    }
+
+    if (delivery.name === 'issue_comment' && delivery.payload.action === 'created') {
+      const { repository, issue, comment } = delivery.payload;
+      // Gate: only PR comments, only maintainers, only the /remember command.
+      if (!issue.pull_request) return;
+      if (!isMaintainer(comment.author_association)) return;
+      const fact = parseRememberCommand(comment.body);
+      if (!fact) return;
+      if (!getDedupStore().claim(delivery.deliveryId)) {
+        console.log('[mimir] duplicate remember delivery skipped', delivery.deliveryId);
+        return;
+      }
+      const owner = repository.owner.login;
+      const repo = repository.name;
+      const prNumber = issue.number;
+      // issue_comment lacks PR head info; fetch it to get the head ref + fork status.
+      const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      if (pr.head.repo?.full_name !== `${owner}/${repo}`) {
+        await client.rest.issues.createComment({
+          owner,
+          repo,
+          issue_number: prNumber,
+          body: '[mimir] `/remember` is not supported for PRs from forks. Memory files must be committed to the base repository.',
+        });
+        return;
+      }
+      const source = `pr#${prNumber} by ${comment.user?.login ?? 'unknown'}`;
+      await admitRemember(c.req.url, { owner, repo, prNumber, headRef: pr.head.ref, fact, source });
       return;
     }
 

@@ -2,12 +2,24 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   type MemoryEntry,
+  commitMemoryEntry,
   hasSkipMarker,
   isMaintainer,
   memoryPath,
   parseRememberCommand,
   renderEntry,
 } from './memory.ts';
+
+const sampleEntry: MemoryEntry = {
+  action: 'create',
+  slug: 'legacy-data-layer',
+  title: 'legacy stays on the old data layer',
+  scope: 'src/legacy/**',
+  source: 'pr#42 by alice',
+  confidence: 'high',
+  body: 'Intentional until the Q3 migration.',
+  reason: 'cross-cutting decision',
+};
 
 test('parseRememberCommand matches both trigger forms', () => {
   assert.equal(parseRememberCommand('/remember legacy dir is intentional'), 'legacy dir is intentional');
@@ -52,4 +64,69 @@ test('renderEntry emits frontmatter + body', () => {
   assert.match(md, /created: 2026-06-20/);
   assert.match(md, /Intentional until the Q3 migration\./);
   assert.equal(memoryPath('legacy-data-layer'), '.mimir/memory/legacy-data-layer.md');
+});
+
+// Plain-object Octokit stub (see repo-tools.test.ts pattern). Captures the args
+// passed to createOrUpdateFileContents for assertions.
+function makeCommitClient(
+  getContent: () => unknown,
+): { client: never; calls: { create: Array<Record<string, unknown>> } } {
+  const calls = { create: [] as Array<Record<string, unknown>> };
+  const client = {
+    rest: {
+      repos: {
+        getContent: async () => getContent(),
+        createOrUpdateFileContents: async (args: Record<string, unknown>) => {
+          calls.create.push(args);
+          return { data: { commit: { html_url: 'https://example.test/commit/abc' } } };
+        },
+      },
+    },
+  } as never;
+  return { client, calls };
+}
+
+test('commitMemoryEntry create path: new file, skip marker in message', async () => {
+  const { client, calls } = makeCommitClient(() => {
+    throw new Error('404 not found'); // getContent throws → treated as new file
+  });
+  const r = await commitMemoryEntry(client, { owner: 'o', repo: 'r', headRef: 'feat' }, sampleEntry);
+  assert.equal(r.path, '.mimir/memory/legacy-data-layer.md');
+  assert.equal(r.commitUrl, 'https://example.test/commit/abc');
+  assert.equal(calls.create.length, 1);
+  const [args] = calls.create;
+  assert.equal(args?.sha, undefined);
+  assert.equal(args?.branch, 'feat');
+  assert.match(String(args?.message), /\[skip review\]/);
+});
+
+test('commitMemoryEntry update path: forwards existing file sha', async () => {
+  const { client, calls } = makeCommitClient(() => ({ data: { type: 'file', sha: 'abc123' } }));
+  await commitMemoryEntry(client, { owner: 'o', repo: 'r', headRef: 'feat' }, sampleEntry);
+  assert.equal(calls.create.length, 1);
+  assert.equal(calls.create[0]?.sha, 'abc123');
+});
+
+test('maintainer gate + parseRememberCommand on a valid command', () => {
+  assert.equal(isMaintainer('CONTRIBUTOR'), false);
+  assert.equal(isMaintainer('OWNER'), true);
+  // A maintainer issuing a valid command yields the fact.
+  assert.equal(parseRememberCommand('/remember legacy dir is intentional'), 'legacy dir is intentional');
+});
+
+// Fork-guard predicate, tested as a unit (the channel handler can't be imported
+// without loading @flue/github and process.exit-on-missing-env at module load).
+function isSameRepoHead(headFullName: string | undefined, owner: string, repo: string): boolean {
+  return headFullName === `${owner}/${repo}`;
+}
+
+test('fork-guard: same-repo head allowed, fork head blocked', () => {
+  assert.equal(isSameRepoHead('o/r', 'o', 'r'), true);
+  assert.equal(isSameRepoHead('forker/r', 'o', 'r'), false);
+  assert.equal(isSameRepoHead(undefined, 'o', 'r'), false);
+});
+
+test('parseRememberCommand returns fact for command, null otherwise', () => {
+  assert.equal(parseRememberCommand('/remember use repos here'), 'use repos here');
+  assert.equal(parseRememberCommand('an unrelated comment'), null);
 });
