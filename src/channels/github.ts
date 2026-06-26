@@ -3,7 +3,7 @@ import { createGitHubChannel } from '@flue/github';
 import { getDedupStore } from '../lib/dedup.ts';
 import { validateEnv } from '../lib/env.ts';
 import { client } from '../lib/github.ts';
-import { hasSkipMarker, isMaintainer, parseRememberCommand } from '../lib/memory.ts';
+import { hasSkipMarker, isMaintainer, parseRememberCommand, parseReviewCommand } from '../lib/memory.ts';
 import type { RememberPayload } from '../workflows/remember-pr.ts';
 import type { ReviewPayload } from '../workflows/review-pr.ts';
 
@@ -147,18 +147,31 @@ export const channel = createGitHubChannel({
 
     if (delivery.name === 'issue_comment' && delivery.payload.action === 'created') {
       const { repository, issue, comment } = delivery.payload;
-      // Gate: only PR comments, only maintainers, only the /remember command.
-      if (!issue.pull_request) return;
-      if (!isMaintainer(comment.author_association)) return;
+      if (!issue.pull_request) return; // PR-only
+      if (!isMaintainer(comment.author_association)) return; // both commands are maintainer-only
+      const owner = repository.owner.login;
+      const repo = repository.name;
+      const prNumber = issue.number;
+
+      // /review — maintainer re-triggers a (read-only) review.
+      if (parseReviewCommand(comment.body)) {
+        if (!getDedupStore().claim(delivery.deliveryId)) {
+          console.log('[mimir] duplicate /review delivery skipped', delivery.deliveryId);
+          return;
+        }
+        const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+        console.log('[mimir] /review command from', comment.user?.login ?? 'unknown');
+        await admitReview(c.req.url, { owner, repo, number: prNumber, headSha: pr.head.sha, baseRef: pr.base.ref });
+        return;
+      }
+
+      // /remember — maintainer commits project memory.
       const fact = parseRememberCommand(comment.body);
       if (!fact) return;
       if (!getDedupStore().claim(delivery.deliveryId)) {
         console.log('[mimir] duplicate remember delivery skipped', delivery.deliveryId);
         return;
       }
-      const owner = repository.owner.login;
-      const repo = repository.name;
-      const prNumber = issue.number;
       // issue_comment lacks PR head info; fetch it to get the head ref + fork status.
       const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
       if (pr.head.repo?.full_name !== `${owner}/${repo}`) {

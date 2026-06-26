@@ -7,6 +7,7 @@ import {
   isMaintainer,
   memoryPath,
   parseRememberCommand,
+  parseReviewCommand,
   renderEntry,
 } from './memory.ts';
 
@@ -129,4 +130,19 @@ test('fork-guard: same-repo head allowed, fork head blocked', () => {
 test('parseRememberCommand returns fact for command, null otherwise', () => {
   assert.equal(parseRememberCommand('/remember use repos here'), 'use repos here');
   assert.equal(parseRememberCommand('an unrelated comment'), null);
+});
+
+test('parseReviewCommand matches both trigger forms', () => {
+  assert.equal(parseReviewCommand('/review'), true);
+  assert.equal(parseReviewCommand('@mimir review', 'mimir'), true);
+  assert.equal(parseReviewCommand('please /review this'), true);
+  assert.equal(parseReviewCommand('hey @bot review', 'bot'), true);
+  assert.equal(parseReviewCommand('/review\nsome context'), true);
+});
+
+test('parseReviewCommand ignores non-commands', () => {
+  assert.equal(parseReviewCommand('I reviewed the code'), false);
+  assert.equal(parseReviewCommand('/reviewing'), false);
+  assert.equal(parseReviewCommand('just a normal comment'), false);
+  assert.equal(parseReviewCommand('@mimir remember something', 'mimir'), false);
 });

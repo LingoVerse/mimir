@@ -49,6 +49,17 @@ export function parseRememberCommand(
   return fact || null;
 }
 
+// Parse `/review` or `@<handle> review` — a re-trigger command (no payload).
+// Returns true if the comment is a review command, false otherwise.
+export function parseReviewCommand(
+  body: string,
+  handle = process.env.MIMIR_HANDLE ?? 'mimir',
+): boolean {
+  const h = escapeRegExp(handle.replace(/^@/, ''));
+  const re = new RegExp(`(?:^|\\s)(?:/review|@${h}\\s+review)(?:\\s|$)`, 'i');
+  return re.test(body);
+}
+
 export function memoryPath(slug: string): string {
   return `${MEMORY_DIR}/${slug}.md`;
 }
