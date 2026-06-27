@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { ReviewPayload } from '../workflows/review-pr.ts';
+import type { ReviewPayload } from '../../workflows/review-pr.ts';
 
 // github.ts validates required env at module load (and process.exit(1) on
 // failure). Set throwaway values BEFORE importing it so the import succeeds in
@@ -9,7 +9,7 @@ process.env.OPENROUTER_API_KEY ??= 'test';
 process.env.GITHUB_WEBHOOK_SECRET ??= 'test';
 process.env.GITHUB_TOKEN ??= 'test';
 
-const { handlePullRequestDelivery, resolveAdmitBase } = await import('./github.ts');
+const { handlePullRequestDelivery, resolveAdmitBase } = await import('../github.ts');
 
 const PR: ReviewPayload = {
   owner: 'test-owner',

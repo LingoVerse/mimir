@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { PrDiff } from '../lib/diff.ts';
-import { type ReviewPayload, buildInstruction } from '../lib/instruction.ts';
+import type { PrDiff } from '../../lib/diff.ts';
+import { type ReviewPayload, buildInstruction } from '../../lib/instruction.ts';
 
 const payload: ReviewPayload = { owner: 'o', repo: 'r', number: 1, headSha: 'sha', baseRef: 'main' };
 
