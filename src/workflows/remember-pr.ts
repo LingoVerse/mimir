@@ -1,5 +1,6 @@
 import { type FlueContext, type WorkflowRouteHandler, createAgent } from '@flue/runtime';
 import { client } from '../lib/github.ts';
+import { logEvent } from '../lib/log.ts';
 import { MemoryEntrySchema, commitMemoryEntry } from '../lib/memory.ts';
 import memoryCurator from '../skills/memory-curator/SKILL.md' with { type: 'skill' };
 
@@ -37,7 +38,7 @@ Apply the memory-curator skill. Return JSON only.`;
   const entry = (await (await harness.session()).prompt(prompt, { result: MemoryEntrySchema })).data;
 
   if (entry.action === 'skip') {
-    log.info('remember skipped by curator', { source: payload.source, reason: entry.reason });
+    logEvent(log, 'remember skipped by curator', { source: payload.source, reason: entry.reason });
     return { outcome: 'skipped' as const, reason: entry.reason };
   }
 
@@ -49,7 +50,7 @@ Apply the memory-curator skill. Return JSON only.`;
     { owner: payload.owner, repo: payload.repo, headRef: payload.headRef },
     entry,
   );
-  log.info('remember committed', { source: payload.source, path: r.path, commitUrl: r.commitUrl });
+  logEvent(log, 'remember committed', { source: payload.source, path: r.path, commitUrl: r.commitUrl });
   return { outcome: 'committed' as const, path: r.path, commitUrl: r.commitUrl };
 }
 

@@ -3,6 +3,7 @@ import { fetchPrDiff } from '../lib/diff.ts';
 import { decideEscalation } from '../lib/escalation.ts';
 import { client } from '../lib/github.ts';
 import { type ReviewPayload, buildInstruction } from '../lib/instruction.ts';
+import { logEvent } from '../lib/log.ts';
 import { postReview } from '../lib/post-review.ts';
 import { fetchProjectContext } from '../lib/project-context.ts';
 import { repoContextTools } from '../lib/repo-tools.ts';
@@ -57,7 +58,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     securitySensitive,
     review: primary,
   });
-  log.info('escalation decision', {
+  logEvent(log, 'escalation decision', {
     escalate: decision.escalate,
     reasons: decision.reasons,
     model: decision.escalate ? ESCALATION_MODEL : PRIMARY_MODEL,
@@ -87,7 +88,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     reasons: decision.reasons,
     truncatedOmitted: diff.truncated?.omitted.length,
   });
-  log.info('review cost', {
+  logEvent(log, 'review cost', {
     primaryModel: primaryResult.model.id,
     primaryInputTokens: primaryResult.usage.input,
     primaryOutputTokens: primaryResult.usage.output,
@@ -100,7 +101,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     totalTokens: primaryResult.usage.totalTokens + (escalationResult?.usage.totalTokens ?? 0),
     totalCostUsd: primaryResult.usage.cost.total + (escalationResult?.usage.cost.total ?? 0),
   });
-  log.info('review posted', {
+  logEvent(log, 'review posted', {
     summaryCommentId: posted.summaryCommentId,
     summaryUpdated: posted.summaryUpdated,
     inlinePosted: posted.inlinePosted,
