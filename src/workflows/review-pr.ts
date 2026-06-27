@@ -83,10 +83,19 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   }
 
   // 5. Post: one summary comment (updated on re-review) + inline comments.
+  //    The cost summary is rendered as a footer so spend is visible on the PR.
+  const cost = {
+    totalUsd: primaryResult.usage.cost.total + (escalationResult?.usage.cost.total ?? 0),
+    primaryModel: primaryResult.model.id,
+    primaryUsd: primaryResult.usage.cost.total,
+    escalationModel: escalationResult?.model.id ?? null,
+    escalationUsd: escalationResult?.usage.cost.total ?? null,
+  };
   const posted = await postReview(payload, review, {
     escalated: decision.escalate,
     reasons: decision.reasons,
     truncatedOmitted: diff.truncated?.omitted.length,
+    cost,
   });
   logEvent(log, 'review cost', {
     primaryModel: primaryResult.model.id,

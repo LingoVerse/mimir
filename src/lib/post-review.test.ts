@@ -44,6 +44,47 @@ test('summary body: escalation + truncation notes', () => {
   assert.match(body, /2 file\(s\) not reviewed/);
 });
 
+test('summary body: cost footer with escalation', () => {
+  const body = buildSummaryBody(
+    review(),
+    {
+      escalated: true,
+      reasons: ['security'],
+      cost: {
+        totalUsd: 0.25,
+        primaryModel: 'google/gemini-3-flash-preview',
+        primaryUsd: 0.01,
+        escalationModel: 'z-ai/glm-5.2',
+        escalationUsd: 0.24,
+      },
+    },
+    false,
+  );
+  assert.match(body, /💰 Review cost: \*\*\$0\.2500\*\*/);
+  assert.match(body, /primary `google\/gemini-3-flash-preview` \$0\.0100/);
+  assert.match(body, /escalation `z-ai\/glm-5\.2` \$0\.2400/);
+});
+
+test('summary body: cost footer omits escalation segment when not escalated', () => {
+  const body = buildSummaryBody(
+    review(),
+    {
+      escalated: false,
+      reasons: [],
+      cost: {
+        totalUsd: 0.01,
+        primaryModel: 'google/gemini-3-flash-preview',
+        primaryUsd: 0.01,
+        escalationModel: null,
+        escalationUsd: null,
+      },
+    },
+    false,
+  );
+  assert.match(body, /💰 Review cost: \*\*\$0\.0100\*\*/);
+  assert.doesNotMatch(body, /escalation/);
+});
+
 function makeReview(): import('./review.ts').ReviewResult {
   return { summary: 's', verdict: 'comment', confidence: 'high', findings: [] };
 }

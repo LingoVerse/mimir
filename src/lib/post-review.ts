@@ -10,11 +10,22 @@ export interface ReviewTarget {
   headSha: string;
 }
 
+// Per-review spend, rendered as a small footer on the summary comment so the
+// cost is visible on the PR without digging into the run logs.
+export interface CostSummary {
+  totalUsd: number;
+  primaryModel: string;
+  primaryUsd: number;
+  escalationModel: string | null;
+  escalationUsd: number | null;
+}
+
 export interface PostMeta {
   escalated: boolean;
   reasons: string[];
   // Number of files dropped by the diff token budget, if any.
   truncatedOmitted?: number;
+  cost?: CostSummary;
 }
 
 // Hidden marker on our summary comment (fallback identity if the stored id is lost).
@@ -75,6 +86,15 @@ export function buildSummaryBody(
     for (const f of inlineFallback) {
       lines.push(`- **[${f.severity}] ${f.title}** (\`${f.file}\`, line ${f.line}) — ${f.body}`);
     }
+  }
+
+  if (meta.cost) {
+    const c = meta.cost;
+    const segments = [`primary \`${c.primaryModel}\` $${c.primaryUsd.toFixed(4)}`];
+    if (c.escalationModel !== null) {
+      segments.push(`escalation \`${c.escalationModel}\` $${(c.escalationUsd ?? 0).toFixed(4)}`);
+    }
+    lines.push('', `<sub>💰 Review cost: **$${c.totalUsd.toFixed(4)}** — ${segments.join(' · ')}</sub>`);
   }
 
   return lines.join('\n');
