@@ -13,7 +13,7 @@ export interface RememberPayload {
   source: string;
 }
 
-const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? 'openrouter/z-ai/glm-5.2';
+const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? 'openrouter/google/gemini-3-flash-preview';
 
 const curatorAgent = createAgent(() => ({
   model: PRIMARY_MODEL,

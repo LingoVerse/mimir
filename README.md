@@ -51,8 +51,8 @@ startup** and refuses to boot if a required var is missing or malformed.
 | `OPENROUTER_API_KEY` | ✅ | — | LLM access (all models via OpenRouter) |
 | `GITHUB_WEBHOOK_SECRET` | ✅ | — | verify inbound webhook signatures |
 | `GITHUB_TOKEN` | ✅ | — | read the diff + post comments |
-| `MODEL_PRIMARY` | | `openrouter/z-ai/glm-5.2` | cheap pass, runs on every PR |
-| `MODEL_ESCALATION` | | `openrouter/google/gemini-flash-3` | stronger pass on hard diffs |
+| `MODEL_PRIMARY` | | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR |
+| `MODEL_ESCALATION` | | `openrouter/z-ai/glm-5.2` | stronger pass on hard diffs |
 | `ESCALATION_DIFF_THRESHOLD` | | `400` | changed-lines trigger for escalation |
 | `DIFF_MAX_TOKENS` | | `60000` | diff token budget (largest-change files kept) |
 | `POST_NITS` | | `false` | also post `nit`-severity comments |

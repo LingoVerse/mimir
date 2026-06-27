@@ -17,8 +17,8 @@ import securityCheck from '../skills/security-check/SKILL.md' with { type: 'skil
 export type { ReviewPayload } from '../lib/instruction.ts';
 
 // Env-configured model tiers (OpenRouter slugs) so swapping is a config change.
-const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? 'openrouter/z-ai/glm-5.2';
-const ESCALATION_MODEL = process.env.MODEL_ESCALATION ?? 'openrouter/google/gemini-flash-3';
+const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? 'openrouter/google/gemini-3-flash-preview';
+const ESCALATION_MODEL = process.env.MODEL_ESCALATION ?? 'openrouter/z-ai/glm-5.2';
 
 // Primary reviewer. Both skills are registered; the security one is applied only
 // when the diff touches a sensitive surface.
