@@ -1,6 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isSafeRepoPath, repoContextTools } from "./repo-tools.ts";
+import { isSafeRepoPath, repoContextTools, resolveToolBudget } from "./repo-tools.ts";
+
+test("resolveToolBudget scales with file count, floored and capped", () => {
+  const fixed = process.env.REPO_TOOL_CALL_BUDGET;
+  const max = process.env.REPO_TOOL_CALL_BUDGET_MAX;
+  delete process.env.REPO_TOOL_CALL_BUDGET;
+  delete process.env.REPO_TOOL_CALL_BUDGET_MAX;
+  try {
+    assert.equal(resolveToolBudget(3), 8); // floor
+    assert.equal(resolveToolBudget(20), 20); // ~one read per file
+    assert.equal(resolveToolBudget(100), 40); // cap
+    process.env.REPO_TOOL_CALL_BUDGET_MAX = "25";
+    assert.equal(resolveToolBudget(100), 25); // configurable cap
+    process.env.REPO_TOOL_CALL_BUDGET = "5";
+    assert.equal(resolveToolBudget(100), 5); // explicit pin overrides scaling
+  } finally {
+    if (fixed === undefined) delete process.env.REPO_TOOL_CALL_BUDGET;
+    else process.env.REPO_TOOL_CALL_BUDGET = fixed;
+    if (max === undefined) delete process.env.REPO_TOOL_CALL_BUDGET_MAX;
+    else process.env.REPO_TOOL_CALL_BUDGET_MAX = max;
+  }
+});
 
 test("isSafeRepoPath rejects absolute paths and traversal", () => {
   for (const ok of ["src/index.ts", "a/b/c.ts", "README.md", ""]) {

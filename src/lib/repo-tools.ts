@@ -10,7 +10,20 @@ export interface RepoRef {
 
 const MAX_FILE_CHARS = 20_000;
 const MAX_SEARCH_RESULTS = 15;
-const DEFAULT_TOOL_BUDGET = 8;
+const MIN_TOOL_BUDGET = 8;
+const MAX_TOOL_BUDGET = 40;
+
+// Per-pass repo-tool-call budget. An explicit REPO_TOOL_CALL_BUDGET pins it (escape
+// hatch / tests); otherwise it scales with the reviewed-file count — roughly one
+// context read per file — so a 20-file PR isn't starved by the small-PR floor,
+// bounded to [MIN_TOOL_BUDGET, REPO_TOOL_CALL_BUDGET_MAX].
+export function resolveToolBudget(fileCount: number): number {
+  const fixed = process.env.REPO_TOOL_CALL_BUDGET;
+  if (fixed !== undefined) return parseInt(fixed, 10);
+  const maxRaw = Number(process.env.REPO_TOOL_CALL_BUDGET_MAX);
+  const max = Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : MAX_TOOL_BUDGET;
+  return Math.min(max, Math.max(MIN_TOOL_BUDGET, fileCount));
+}
 
 // Reject absolute paths and traversal — the model only addresses paths within
 // the fixed {owner, repo, ref}, never escapes the repo.
@@ -27,11 +40,8 @@ function errMessage(err: unknown): string {
 // diff doesn't show (callers, schemas, related modules). The scope is fixed by
 // the closure — tool parameters only choose paths/queries, never the repo/ref
 // (parameters are not an authorization boundary).
-export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef) {
-  const budget =
-    process.env.REPO_TOOL_CALL_BUDGET !== undefined
-      ? parseInt(process.env.REPO_TOOL_CALL_BUDGET, 10)
-      : DEFAULT_TOOL_BUDGET;
+export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef, fileCount = 0) {
+  const budget = resolveToolBudget(fileCount);
   let callCount = 0;
 
   function guardedExecute(

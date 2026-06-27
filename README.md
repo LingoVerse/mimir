@@ -55,6 +55,8 @@ startup** and refuses to boot if a required var is missing or malformed.
 | `MODEL_ESCALATION`          |          | `openrouter/z-ai/glm-5.2`                  | stronger pass on hard diffs                                     |
 | `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                            |
 | `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                   |
+| `REPO_TOOL_CALL_BUDGET`     |          | auto                                       | pin per-pass repo-tool calls (else scales ~1/reviewed file)     |
+| `REPO_TOOL_CALL_BUDGET_MAX` |          | `40`                                       | cap when the tool-call budget auto-scales with PR size          |
 | `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                               |
 | `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review |
 | `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or a bare path)                    |

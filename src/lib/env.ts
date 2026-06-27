@@ -22,6 +22,7 @@ const EnvSchema = v.object({
   ESCALATION_DIFF_THRESHOLD: wholeNumber("ESCALATION_DIFF_THRESHOLD"),
   DIFF_MAX_TOKENS: wholeNumber("DIFF_MAX_TOKENS"),
   REPO_TOOL_CALL_BUDGET: wholeNumber("REPO_TOOL_CALL_BUDGET"),
+  REPO_TOOL_CALL_BUDGET_MAX: wholeNumber("REPO_TOOL_CALL_BUDGET_MAX"),
   POST_NITS: v.optional(v.picklist(["true", "false"], 'POST_NITS must be "true" or "false"')),
   ESCALATE_SECURITY_ALWAYS: v.optional(
     v.picklist(["true", "false"], 'ESCALATE_SECURITY_ALWAYS must be "true" or "false"'),

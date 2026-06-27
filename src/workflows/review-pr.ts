@@ -53,7 +53,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   // pass starve the escalation pass of context reads. The escalation tools are
   // built lazily below, only when we actually escalate.
   const toolRef = { owner: payload.owner, repo: payload.repo, ref: payload.headSha };
-  const tools = repoContextTools(client, toolRef);
+  const tools = repoContextTools(client, toolRef, diff.files.length);
 
   // 2. Primary pass on MODEL_PRIMARY.
   const harness = await init(reviewer);
@@ -87,7 +87,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     escalationResult = await escalationSession.prompt(instruction, {
       result: ReviewResultSchema,
       model: ESCALATION_MODEL,
-      tools: repoContextTools(client, toolRef),
+      tools: repoContextTools(client, toolRef, diff.files.length),
     });
     review = escalationResult.data;
   }
