@@ -1,11 +1,11 @@
-import type { Octokit } from '@octokit/rest';
-import type { RepoRef } from './repo-tools.ts';
+import type { Octokit } from "@octokit/rest";
+import type { RepoRef } from "./repo-tools.ts";
 
 // Agent-guidance files projects commonly already maintain. Read from the PR's
 // BASE branch (trusted) and injected as review context — so Mimir honours the
 // project's own conventions (and, later, its `.mimir/memory`).
-const GUIDANCE_PATHS = ['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md'];
-const MEMORY_DIR = '.mimir/memory';
+const GUIDANCE_PATHS = ["CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md"];
+const MEMORY_DIR = ".mimir/memory";
 
 const DEFAULT_MAX_CHARS = 20_000;
 const MAX_PER_FILE = 6_000;
@@ -21,13 +21,15 @@ export function buildContextBlock(files: ContextFile[], maxChars = DEFAULT_MAX_C
   let total = 0;
   for (const file of files) {
     const body =
-      file.text.length > MAX_PER_FILE ? `${file.text.slice(0, MAX_PER_FILE)}\n… [truncated]` : file.text;
+      file.text.length > MAX_PER_FILE
+        ? `${file.text.slice(0, MAX_PER_FILE)}\n… [truncated]`
+        : file.text;
     const block = `### ${file.path}\n${body}`;
     if (total + block.length > maxChars) break;
     parts.push(block);
     total += block.length;
   }
-  return parts.join('\n\n');
+  return parts.join("\n\n");
 }
 
 async function readFile(client: Octokit, ref: RepoRef, path: string): Promise<ContextFile | null> {
@@ -38,8 +40,8 @@ async function readFile(client: Octokit, ref: RepoRef, path: string): Promise<Co
       path,
       ref: ref.ref,
     });
-    if (Array.isArray(data) || data.type !== 'file' || !data.content) return null;
-    return { path, text: Buffer.from(data.content, 'base64').toString('utf8') };
+    if (Array.isArray(data) || data.type !== "file" || !data.content) return null;
+    return { path, text: Buffer.from(data.content, "base64").toString("utf8") };
   } catch {
     return null; // file absent — fine
   }
@@ -68,7 +70,7 @@ export async function fetchProjectContext(
     });
     if (Array.isArray(data)) {
       for (const entry of data) {
-        if (entry.type === 'file' && entry.name.endsWith('.md')) {
+        if (entry.type === "file" && entry.name.endsWith(".md")) {
           const file = await readFile(client, ref, entry.path);
           if (file) files.push(file);
         }

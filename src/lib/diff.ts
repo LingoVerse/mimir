@@ -1,4 +1,4 @@
-import type { Octokit } from '@octokit/rest';
+import type { Octokit } from "@octokit/rest";
 
 export interface PrRef {
   owner: string;
@@ -34,25 +34,25 @@ function readMaxTokens(): number {
 }
 
 const LOCKFILES = new Set([
-  'package-lock.json',
-  'npm-shrinkwrap.json',
-  'yarn.lock',
-  'pnpm-lock.yaml',
-  'bun.lock',
-  'bun.lockb',
-  'Cargo.lock',
-  'composer.lock',
-  'Gemfile.lock',
-  'poetry.lock',
-  'go.sum',
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "Cargo.lock",
+  "composer.lock",
+  "Gemfile.lock",
+  "poetry.lock",
+  "go.sum",
 ]);
 
 // Generated/vendored paths that add noise without review value (§7 step 2).
 export function isSkippablePath(path: string): boolean {
-  if (path.includes('node_modules/')) return true;
-  if (path === 'dist' || path.startsWith('dist/') || path.includes('/dist/')) return true;
+  if (path.includes("node_modules/")) return true;
+  if (path === "dist" || path.startsWith("dist/") || path.includes("/dist/")) return true;
   if (/\.min\.[^/.]+$/.test(path)) return true; // *.min.js, *.min.css, ...
-  return LOCKFILES.has(path.slice(path.lastIndexOf('/') + 1));
+  return LOCKFILES.has(path.slice(path.lastIndexOf("/") + 1));
 }
 
 // Rough token estimate (~4 chars/token) for budgeting the diff.
@@ -65,7 +65,7 @@ function estimateTokens(file: FileDiff): number {
 export function chunkFiles(
   files: FileDiff[],
   maxTokens = readMaxTokens(),
-): Pick<PrDiff, 'files' | 'truncated'> {
+): Pick<PrDiff, "files" | "truncated"> {
   let total = 0;
   for (const file of files) total += estimateTokens(file);
   if (total <= maxTokens) return { files, truncated: null };
@@ -91,13 +91,16 @@ export function chunkFiles(
   };
 }
 
-// Fetch a PR's per-file diff via octokit, drop generated/vendored paths, and
-// cap to a token budget. The caller passes the channel-owned Octokit client.
+// Fetch a PR's per-file diff via octokit, drop generated/vendored paths (plus
+// any the project's `.mimirignore` lists), and cap to a token budget. The caller
+// passes the channel-owned Octokit client and the project's ignore predicate.
 export async function fetchPrDiff(
   client: Octokit,
   ref: PrRef,
-  maxTokens = readMaxTokens(),
+  opts: { ignore?: (path: string) => boolean; maxTokens?: number } = {},
 ): Promise<PrDiff> {
+  const maxTokens = opts.maxTokens ?? readMaxTokens();
+  const ignore = opts.ignore;
   const raw = await client.paginate(client.rest.pulls.listFiles, {
     owner: ref.owner,
     repo: ref.repo,
@@ -110,7 +113,7 @@ export async function fetchPrDiff(
   let totalChangedLines = 0;
 
   for (const f of raw) {
-    if (isSkippablePath(f.filename)) {
+    if (isSkippablePath(f.filename) || ignore?.(f.filename)) {
       skipped.push(f.filename);
       continue;
     }

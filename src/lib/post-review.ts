@@ -1,6 +1,6 @@
-import { type SummaryCommentStore, getSummaryCommentStore } from './dedup.ts';
-import { client } from './github.ts';
-import type { Finding, ReviewResult, Severity } from './review.ts';
+import { type SummaryCommentStore, getSummaryCommentStore } from "./dedup.ts";
+import { client } from "./github.ts";
+import type { Finding, ReviewResult, Severity } from "./review.ts";
 
 // PR coordinates needed to post. `headSha` is the commit inline comments attach to.
 export interface ReviewTarget {
@@ -29,21 +29,21 @@ export interface PostMeta {
 }
 
 // Hidden marker on our summary comment (fallback identity if the stored id is lost).
-const MARKER = '<!-- mimir-summary -->';
+const MARKER = "<!-- mimir-summary -->";
 
-const VERDICT_LABEL: Record<ReviewResult['verdict'], string> = {
-  request_changes: '🔴 Changes requested',
-  comment: '🟡 Comments',
-  approve_suggestion: '🟢 No blocking issues',
+const VERDICT_LABEL: Record<ReviewResult["verdict"], string> = {
+  request_changes: "🔴 Changes requested",
+  comment: "🟡 Comments",
+  approve_suggestion: "🟢 No blocking issues",
 };
 
 function postNitsEnabled(): boolean {
-  return process.env.POST_NITS === 'true';
+  return process.env.POST_NITS === "true";
 }
 
 // Findings worth surfacing: nits are suppressed unless POST_NITS=true.
 export function visibleFindings(findings: Finding[], postNits = postNitsEnabled()): Finding[] {
-  return findings.filter((f) => postNits || f.severity !== 'nit');
+  return findings.filter((f) => postNits || f.severity !== "nit");
 }
 
 function countBySeverity(findings: Finding[]): Record<Severity, number> {
@@ -60,29 +60,38 @@ export function buildSummaryBody(
   inlineFallback: Finding[] = [],
 ): string {
   const counts = countBySeverity(review.findings);
-  const nitNote = !postNits && counts.nit > 0 ? ' _(suppressed)_' : '';
+  const nitNote = !postNits && counts.nit > 0 ? " _(suppressed)_" : "";
   const countLine = `**Findings:** ${counts.critical} critical · ${counts.major} major · ${counts.minor} minor · ${counts.nit} nit${nitNote}`;
 
-  const lines = [MARKER, `## Mimir review — ${VERDICT_LABEL[review.verdict]}`, '', review.summary, '', countLine];
+  const lines = [
+    MARKER,
+    `## Mimir review — ${VERDICT_LABEL[review.verdict]}`,
+    "",
+    review.summary,
+    "",
+    countLine,
+  ];
 
   if (meta.escalated) {
-    lines.push(`> Escalated to the stronger model (${meta.reasons.join(', ')}).`);
+    lines.push(`> Escalated to the stronger model (${meta.reasons.join(", ")}).`);
   }
   if (meta.truncatedOmitted && meta.truncatedOmitted > 0) {
-    lines.push(`> Diff truncated to fit the token budget; ${meta.truncatedOmitted} file(s) not reviewed.`);
+    lines.push(
+      `> Diff truncated to fit the token budget; ${meta.truncatedOmitted} file(s) not reviewed.`,
+    );
   }
 
   // File-level findings (no line) can't be inline — list them here.
   const general = visibleFindings(review.findings, postNits).filter((f) => f.line === undefined);
   if (general.length > 0) {
-    lines.push('', '### General findings');
+    lines.push("", "### General findings");
     for (const f of general) {
       lines.push(`- **[${f.severity}] ${f.title}** (\`${f.file}\`) — ${f.body}`);
     }
   }
 
   if (inlineFallback.length > 0) {
-    lines.push('', "### Findings that couldn't be posted inline");
+    lines.push("", "### Findings that couldn't be posted inline");
     for (const f of inlineFallback) {
       lines.push(`- **[${f.severity}] ${f.title}** (\`${f.file}\`, line ${f.line}) — ${f.body}`);
     }
@@ -94,16 +103,19 @@ export function buildSummaryBody(
     if (c.escalationModel !== null) {
       segments.push(`escalation \`${c.escalationModel}\` $${(c.escalationUsd ?? 0).toFixed(4)}`);
     }
-    lines.push('', `<sub>💰 Review cost: **$${c.totalUsd.toFixed(4)}** — ${segments.join(' · ')}</sub>`);
+    lines.push(
+      "",
+      `<sub>💰 Review cost: **$${c.totalUsd.toFixed(4)}** — ${segments.join(" · ")}</sub>`,
+    );
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function inlineCommentBody(f: Finding): string {
-  const parts = [`**[${f.severity}] ${f.title}**`, '', f.body];
-  if (f.suggestion) parts.push('', `**Suggestion:** ${f.suggestion}`);
-  return parts.join('\n');
+  const parts = [`**[${f.severity}] ${f.title}**`, "", f.body];
+  if (f.suggestion) parts.push("", `**Suggestion:** ${f.suggestion}`);
+  return parts.join("\n");
 }
 
 export interface PostResult {
@@ -137,11 +149,11 @@ export async function postReview(
         repo,
         pull_number: number,
         commit_id: target.headSha,
-        event: 'COMMENT',
+        event: "COMMENT",
         comments: inline.map((f) => ({
           path: f.file,
           line: f.line as number,
-          side: 'RIGHT',
+          side: "RIGHT",
           body: inlineCommentBody(f),
         })),
       });
@@ -149,7 +161,7 @@ export async function postReview(
     } catch (err) {
       // GitHub 422s the whole review if a line isn't in the diff; forward the
       // findings into the summary so a critical one never silently vanishes.
-      console.warn('[mimir] inline review failed; forwarding findings to summary:', String(err));
+      console.warn("[mimir] inline review failed; forwarding findings to summary:", String(err));
       inlineFallback = inline;
     }
   }

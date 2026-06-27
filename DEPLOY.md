@@ -23,7 +23,7 @@ GitHub webhook config and the app's `GITHUB_WEBHOOK_SECRET`.
    ```
 2. Repo → **Settings → Webhooks → Add webhook** (org-wide: Org **Settings → Webhooks**):
    - **Payload URL:** `https://<your-host>/channels/github/webhook`
-   - **Content type:** `application/json`  ← required (form-encoded is rejected with `415`)
+   - **Content type:** `application/json` ← required (form-encoded is rejected with `415`)
    - **Secret:** the value from step 1
    - **Which events:** "Let me select individual events" → **Pull requests**
      (optionally **Issue comments** / **Pull request review comments** for future `/review`
@@ -44,7 +44,7 @@ account if you want "Mimir" as the author. Pick one:
   - Permissions:
     - **Contents:** Read-only
     - **Pull requests:** Read and write
-    - *(Metadata: Read-only — granted automatically)*
+    - _(Metadata: Read-only — granted automatically)_
 - **Classic PAT** — <https://github.com/settings/tokens>
   - Scope **`repo`** (private repos) or **`public_repo`** (public only)
 - **GitHub App** (best for orgs / many repos)
@@ -98,10 +98,10 @@ The image is Node-based, runs non-root, listens on `:3000` (binds `0.0.0.0`), ha
 
 ## Troubleshooting
 
-| Symptom | Cause / fix |
-| --- | --- |
-| Boot fails: `Invalid environment …` | a required var is missing/empty — the message lists which |
-| Webhook `401` | secret mismatch between GitHub and `GITHUB_WEBHOOK_SECRET` |
-| Webhook `415` | content type isn't `application/json` |
-| No comments / `403` from GitHub | `GITHUB_TOKEN` lacks **Pull requests: write** (or `repo`), or no access to that repo |
-| Reviews never start behind a proxy | set `INTERNAL_BASE_URL` to the container loopback, e.g. `http://127.0.0.1:3000` |
+| Symptom                             | Cause / fix                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------ |
+| Boot fails: `Invalid environment …` | a required var is missing/empty — the message lists which                            |
+| Webhook `401`                       | secret mismatch between GitHub and `GITHUB_WEBHOOK_SECRET`                           |
+| Webhook `415`                       | content type isn't `application/json`                                                |
+| No comments / `403` from GitHub     | `GITHUB_TOKEN` lacks **Pull requests: write** (or `repo`), or no access to that repo |
+| Reviews never start behind a proxy  | set `INTERNAL_BASE_URL` to the container loopback, e.g. `http://127.0.0.1:3000`      |

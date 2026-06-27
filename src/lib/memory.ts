@@ -1,28 +1,28 @@
-import { Buffer } from 'node:buffer';
-import type { Octokit } from '@octokit/rest';
-import * as v from 'valibot';
+import { Buffer } from "node:buffer";
+import type { Octokit } from "@octokit/rest";
+import * as v from "valibot";
 
 // Structured output of the memory-curator skill.
 export const MemoryEntrySchema = v.object({
-  action: v.picklist(['create', 'update', 'skip']),
-  slug: v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]*$/, 'slug must be kebab-case')),
+  action: v.picklist(["create", "update", "skip"]),
+  slug: v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]*$/, "slug must be kebab-case")),
   title: v.string(),
   scope: v.string(),
   source: v.string(),
-  confidence: v.picklist(['high', 'medium']),
+  confidence: v.picklist(["high", "medium"]),
   body: v.string(),
   reason: v.string(),
 });
 export type MemoryEntry = v.InferOutput<typeof MemoryEntrySchema>;
 
-export type RememberSource = 'command' | 'observed';
+export type RememberSource = "command" | "observed";
 
-const MEMORY_DIR = '.mimir/memory';
+const MEMORY_DIR = ".mimir/memory";
 // Marker on memory commits so the resulting `synchronize` is not re-reviewed
 // (and a manual human opt-out lever on any push).
-export const SKIP_MARKERS = ['[skip review]', '[mimir skip]'];
+export const SKIP_MARKERS = ["[skip review]", "[mimir skip]"];
 
-const MAINTAINER_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+const MAINTAINER_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
 export function isMaintainer(association: string | undefined): boolean {
   return association !== undefined && MAINTAINER_ASSOCIATIONS.has(association);
@@ -33,18 +33,33 @@ export function hasSkipMarker(commitMessage: string): boolean {
   return SKIP_MARKERS.some((m) => lower.includes(m));
 }
 
+// PR labels that exclude the whole PR from review (unlike the commit marker,
+// this persists across every push). Configurable via SKIP_LABELS (comma-
+// separated); defaults to `mimir:skip`. Useful for huge migration PRs where
+// review would be costly and low-value.
+export function skipLabels(): string[] {
+  const raw = process.env.SKIP_LABELS;
+  const names = raw !== undefined ? raw.split(",") : ["mimir:skip"];
+  return names.map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+export function hasSkipLabel(labels: string[]): boolean {
+  const skip = new Set(skipLabels());
+  return labels.some((l) => skip.has(l.toLowerCase()));
+}
+
 function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // Parse `/remember <fact>` or `@<handle> remember <fact>` (handle configurable,
 // since the bot's GitHub login may not be "mimir"). Returns the fact, or null.
 export function parseRememberCommand(
   body: string,
-  handle = process.env.MIMIR_HANDLE ?? 'mimir',
+  handle = process.env.MIMIR_HANDLE ?? "mimir",
 ): string | null {
-  const h = escapeRegExp(handle.replace(/^@/, ''));
-  const re = new RegExp(`(?:^|\\s)(?:/remember|@${h}\\s+remember)\\s+(.+)`, 'is');
+  const h = escapeRegExp(handle.replace(/^@/, ""));
+  const re = new RegExp(`(?:^|\\s)(?:/remember|@${h}\\s+remember)\\s+(.+)`, "is");
   const fact = body.match(re)?.[1]?.trim();
   return fact || null;
 }
@@ -53,10 +68,10 @@ export function parseRememberCommand(
 // Returns true if the comment is a review command, false otherwise.
 export function parseReviewCommand(
   body: string,
-  handle = process.env.MIMIR_HANDLE ?? 'mimir',
+  handle = process.env.MIMIR_HANDLE ?? "mimir",
 ): boolean {
-  const h = escapeRegExp(handle.replace(/^@/, ''));
-  const re = new RegExp(`(?:^|\\s)(?:/review|@${h}\\s+review)(?:\\s|$)`, 'i');
+  const h = escapeRegExp(handle.replace(/^@/, ""));
+  const re = new RegExp(`(?:^|\\s)(?:/review|@${h}\\s+review)(?:\\s|$)`, "i");
   return re.test(body);
 }
 
@@ -97,7 +112,7 @@ export async function commitMemoryEntry(
       path,
       ref: target.headRef,
     });
-    if (!Array.isArray(data) && data.type === 'file') sha = data.sha;
+    if (!Array.isArray(data) && data.type === "file") sha = data.sha;
   } catch {
     // new file
   }
@@ -108,7 +123,7 @@ export async function commitMemoryEntry(
     path,
     branch: target.headRef,
     message: `chore(mimir): remember ${entry.title} ${SKIP_MARKERS[0]}`,
-    content: Buffer.from(renderEntry(entry), 'utf8').toString('base64'),
+    content: Buffer.from(renderEntry(entry), "utf8").toString("base64"),
     sha,
   });
   return { path, commitUrl: res.data.commit.html_url };

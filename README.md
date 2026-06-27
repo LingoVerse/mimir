@@ -6,8 +6,8 @@ diffs to a stronger model, and posts a **summary comment + inline comments**. Re
 code — it comments, humans decide. Model-agnostic via **OpenRouter**; a drop-in replacement
 for the consumer Gemini Code Assist GitHub reviewer.
 
-> *Mimir* — in Norse myth, the wise severed head Odin consults before every decision. A
-> reviewer is the counsel you consult before merging; and a head with no body is *headless*,
+> _Mimir_ — in Norse myth, the wise severed head Odin consults before every decision. A
+> reviewer is the counsel you consult before merging; and a head with no body is _headless_,
 > which is how Flue describes itself. The name is the architecture.
 
 ## How it works
@@ -15,7 +15,7 @@ for the consumer Gemini Code Assist GitHub reviewer.
 ```
 GitHub webhook
   → verify signature + dedup delivery        (channels/github.ts)
-  → fetch & chunk diff, skip generated/vendored   (lib/diff.ts)
+  → fetch & chunk diff, skip generated/vendored + `.mimirignore`  (lib/diff.ts, lib/ignore.ts)
   → load project context: the repo's own conventions/memory from the base branch,
       + read-only repo tools so the model can pull related code the diff omits
       (lib/project-context.ts, lib/repo-tools.ts)
@@ -46,18 +46,19 @@ production deploy — is in **[DEPLOY.md](DEPLOY.md)**.
 All model selection is env, so swapping models is a config change. The app **validates env at
 startup** and refuses to boot if a required var is missing or malformed.
 
-| Var | Required | Default | Purpose |
-| --- | :---: | --- | --- |
-| `OPENROUTER_API_KEY` | ✅ | — | LLM access (all models via OpenRouter) |
-| `GITHUB_WEBHOOK_SECRET` | ✅ | — | verify inbound webhook signatures |
-| `GITHUB_TOKEN` | ✅ | — | read the diff + post comments |
-| `MODEL_PRIMARY` | | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR |
-| `MODEL_ESCALATION` | | `openrouter/z-ai/glm-5.2` | stronger pass on hard diffs |
-| `ESCALATION_DIFF_THRESHOLD` | | `400` | changed-lines trigger for escalation |
-| `DIFF_MAX_TOKENS` | | `60000` | diff token budget (largest-change files kept) |
-| `POST_NITS` | | `false` | also post `nit`-severity comments |
-| `DATABASE_URL` | | `./data/mimir.db` | sqlite path (`sqlite:<path>` or a bare path) |
-| `INTERNAL_BASE_URL` | | request origin | loopback used to admit review runs behind a proxy |
+| Var                         | Required | Default                                    | Purpose                                                         |
+| --------------------------- | :------: | ------------------------------------------ | --------------------------------------------------------------- |
+| `OPENROUTER_API_KEY`        |    ✅    | —                                          | LLM access (all models via OpenRouter)                          |
+| `GITHUB_WEBHOOK_SECRET`     |    ✅    | —                                          | verify inbound webhook signatures                               |
+| `GITHUB_TOKEN`              |    ✅    | —                                          | read the diff + post comments                                   |
+| `MODEL_PRIMARY`             |          | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR                                    |
+| `MODEL_ESCALATION`          |          | `openrouter/z-ai/glm-5.2`                  | stronger pass on hard diffs                                     |
+| `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                            |
+| `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                   |
+| `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                               |
+| `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review |
+| `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or a bare path)                    |
+| `INTERNAL_BASE_URL`         |          | request origin                             | loopback used to admit review runs behind a proxy               |
 
 ## Project layout
 
@@ -91,6 +92,18 @@ Tests run under `node --test` (matching the Node runtime, where `node:sqlite` is
   stronger model and replaces the result (also double-checking critical claims).
 - **Idempotency.** Webhook deliveries are claimed in SQLite (replays skipped); the summary
   comment id is stored so a re-push updates one comment instead of stacking new ones.
+- **`.mimirignore`.** A repo can drop generated artefacts from review (e.g. a 3k-line Drizzle
+  `migrations/meta/*_snapshot.json`) by committing a `.mimirignore` to the **base branch** —
+  gitignore-style globs, one per line, `#` comments allowed. Matching files are filtered out of
+  the diff before review, so the model never reads them and they don't burn the token budget.
+  Read from the base (not the PR head) so a PR cannot exclude its own files from review; it
+  takes effect once merged. Built-in skips (`node_modules`, `dist`, `*.min.*`, lockfiles) apply
+  regardless. Example `.mimirignore`:
+  ```
+  # generated Drizzle migration snapshots
+  **/migrations/meta/
+  *_snapshot.json
+  ```
 - **Context beyond the diff.** The reviewer reads the project's own agent-guidance
   (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `.mimir/memory/*`) from the
   base branch, and has read-only, repo-scoped tools (`read_repo_file`, `list_repo_dir`,

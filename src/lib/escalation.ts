@@ -1,4 +1,4 @@
-import type { ReviewResult } from './review.ts';
+import type { ReviewResult } from "./review.ts";
 
 export interface EscalationInput {
   // Changed lines across reviewable files (pre-truncation).
@@ -21,7 +21,7 @@ function diffThreshold(): number {
 }
 
 function escalateSecurityAlways(): boolean {
-  return process.env.ESCALATE_SECURITY_ALWAYS !== 'false';
+  return process.env.ESCALATE_SECURITY_ALWAYS !== "false";
 }
 
 // Decide whether to re-review with the stronger model (build-spec §5). Escalate
@@ -36,15 +36,15 @@ export function decideEscalation(input: EscalationInput): EscalationDecision {
   }
   if (
     input.securitySensitive &&
-    (escalateSecurityAlways() || input.review.findings.some((f) => f.severity !== 'nit'))
+    (escalateSecurityAlways() || input.review.findings.some((f) => f.severity !== "nit"))
   ) {
-    reasons.push('security-sensitive-path');
+    reasons.push("security-sensitive-path");
   }
-  if (input.review.confidence === 'low') {
-    reasons.push('low-confidence');
+  if (input.review.confidence === "low") {
+    reasons.push("low-confidence");
   }
-  if (input.review.findings.some((f) => f.severity === 'critical')) {
-    reasons.push('critical-finding');
+  if (input.review.findings.some((f) => f.severity === "critical")) {
+    reasons.push("critical-finding");
   }
 
   return { escalate: reasons.length > 0, reasons };

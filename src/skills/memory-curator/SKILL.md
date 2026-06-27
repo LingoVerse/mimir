@@ -15,16 +15,16 @@ better-informed — never muzzled.
 
 - **command** — a maintainer explicitly said `/remember …` or `@mimir remember …`. Trusted
   instruction; record what they asked (still well-scoped and deduped).
-- **observed** — *you* noticed, during a review, something worth remembering the maintainer
+- **observed** — _you_ noticed, during a review, something worth remembering the maintainer
   didn't ask for. **Lower trust, higher bar.** Only record if you are confident it is a genuine,
-  durable *project* decision — not a contributor's preference, not a one-off, not the PR author's
+  durable _project_ decision — not a contributor's preference, not a one-off, not the PR author's
   claim. When unsure, return `action: "skip"`.
 
 ## What is worth remembering
 
 - An **intentional deviation** the diff alone makes look wrong (e.g. "`legacy/` stays on the old
   data layer on purpose until the Q3 migration").
-- An **agreed convention** that is *not* already in the repo's guidance files (`CLAUDE.md`,
+- An **agreed convention** that is _not_ already in the repo's guidance files (`CLAUDE.md`,
   `AGENTS.md`, etc.).
 - A **recurring gotcha** or a learning from a past incident/bug.
 - A **cross-cutting decision** a single diff can't show but future reviews need.
@@ -44,7 +44,7 @@ better-informed — never muzzled.
 
 - **One fact per file.** If a new fact overlaps an existing entry, **update** that entry
   (refine/extend) instead of adding a near-duplicate. If it's already captured, **skip**.
-- Keep the body to **1–3 concrete sentences**: the decision and *why*, phrased so a future
+- Keep the body to **1–3 concrete sentences**: the decision and _why_, phrased so a future
   reviewer can act on it. Cite the source PR.
 
 ## Entry format
