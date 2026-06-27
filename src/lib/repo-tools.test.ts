@@ -75,3 +75,29 @@ test('repoContextTools budget is shared across tools', async () => {
     else process.env.REPO_TOOL_CALL_BUDGET = originalBudget;
   }
 });
+
+test('repoContextTools budget is independent per instance', async () => {
+  // The escalation pass builds its own tool instance so the primary pass cannot
+  // starve it of context reads (review-pr.ts). Each instance owns its budget.
+  let hits = 0;
+  const client = makeClient(() => { hits += 1; return { data: [] }; });
+  const originalBudget = process.env.REPO_TOOL_CALL_BUDGET;
+  process.env.REPO_TOOL_CALL_BUDGET = '1';
+  try {
+    const [, primaryListDir] = repoContextTools(client, { owner: 'o', repo: 'r', ref: 'sha' });
+    const [, escalationListDir] = repoContextTools(client, { owner: 'o', repo: 'r', ref: 'sha' });
+    assert.ok(primaryListDir);
+    assert.ok(escalationListDir);
+    // Primary exhausts its own budget.
+    await primaryListDir.execute({ path: '' });
+    const primaryBlocked = await primaryListDir.execute({ path: '' });
+    assert.match(primaryBlocked, /budget exhausted/);
+    // Escalation still has its full budget — not affected by the primary pass.
+    const escalationResult = await escalationListDir.execute({ path: '' });
+    assert.doesNotMatch(escalationResult, /budget exhausted/);
+    assert.equal(hits, 2);
+  } finally {
+    if (originalBudget === undefined) delete process.env.REPO_TOOL_CALL_BUDGET;
+    else process.env.REPO_TOOL_CALL_BUDGET = originalBudget;
+  }
+});

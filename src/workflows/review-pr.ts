@@ -39,12 +39,12 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   const instruction = buildInstruction(payload, diff, securitySensitive, projectContext);
 
   // Read-only repo tools scoped to the PR head, so the model can pull related
-  // code the diff omits. Available to both passes.
-  const tools = repoContextTools(client, {
-    owner: payload.owner,
-    repo: payload.repo,
-    ref: payload.headSha,
-  });
+  // code the diff omits. Each pass gets its OWN instance: the call budget lives
+  // in the closure (repo-tools.ts), so a shared instance would let the primary
+  // pass starve the escalation pass of context reads. The escalation tools are
+  // built lazily below, only when we actually escalate.
+  const toolRef = { owner: payload.owner, repo: payload.repo, ref: payload.headSha };
+  const tools = repoContextTools(client, toolRef);
 
   // 2. Primary pass on MODEL_PRIMARY.
   const harness = await init(reviewer);
@@ -76,7 +76,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     escalationResult = await escalationSession.prompt(instruction, {
       result: ReviewResultSchema,
       model: ESCALATION_MODEL,
-      tools,
+      tools: repoContextTools(client, toolRef),
     });
     review = escalationResult.data;
   }
