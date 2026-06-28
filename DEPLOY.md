@@ -86,6 +86,31 @@ The image is Node-based, runs non-root, listens on `:3000` (binds `0.0.0.0`), ha
 4. Storage: mount a volume at **`/data`**.
 5. Domain: assign one with HTTPS — that host is your webhook **Payload URL** base.
 
+### Cloudflare Workers (experimental)
+
+Mimir is built on [Flue](https://flueframework.com) by the Astro team, which supports
+Cloudflare Workers as a deployment target. Each agent becomes a Durable Object with
+automatic scaling.
+
+**Prerequisites:**
+
+- A Cloudflare account with Workers Paid plan (Durable Objects required)
+- `wrangler` CLI installed (`npm install -g wrangler`)
+
+**Build & deploy:**
+
+```bash
+flue build --target cloudflare
+npx wrangler deploy --secrets-file .env
+```
+
+**⚠️ Known limitation:** Mimir currently uses `node:sqlite` (Node built-in) for delivery
+dedup, comment-ID tracking, and review stats. Cloudflare Workers does not support
+`node:sqlite` — these features require adapting to **Cloudflare D1** or another KV store
+before this deploy path is fully functional. PRs welcome.
+
+The Docker / Node deploy is the current recommended production path.
+
 ## 5. Verify it works
 
 - **Ping:** webhook **Recent Deliveries** → latest `ping` shows `200`.
