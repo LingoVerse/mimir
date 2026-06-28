@@ -66,7 +66,7 @@ export function buildInstruction(
       ? `\n## Focus — escalation was triggered for these files; prioritise them\n${scopeFiles.map((f) => `- ${f}`).join("\n")}`
       : null,
     priorReview
-      ? `\n## Prior review output — the first pass found these, but it may have missed issues or over-indexed. Review the diff yourself; use the tools to verify any claim that affects your verdict. Do not treat this as authoritative.\n${priorReview.summary}\n${priorReview.findings.map((f) => `- [${f.severity}] ${f.file}:${f.line ?? "?"} — ${f.title}`).join("\n")}`
+      ? `\n## Prior review output — findings from the first pass; use them as context alongside your own analysis\n${priorReview.summary}\n${priorReview.findings.map((f) => `- [${f.severity}] ${f.file}:${f.line ?? "?"} — ${f.title}`).join("\n")}`
       : null,
     `\nPull request: ${payload.owner}/${payload.repo}#${payload.number} @ ${payload.headSha}`,
     "",
