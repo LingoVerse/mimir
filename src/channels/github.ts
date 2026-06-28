@@ -6,10 +6,12 @@ import { client } from "../lib/github.ts";
 import {
   hasSkipLabel,
   hasSkipMarker,
+  isLikelyFeedback,
   isMaintainer,
   parseRememberCommand,
   parseReviewCommand,
 } from "../lib/memory.ts";
+import type { FeedbackPayload } from "../workflows/feedback-pr.ts";
 import type { RememberPayload } from "../workflows/remember-pr.ts";
 import type { ReviewPayload } from "../workflows/review-pr.ts";
 
@@ -65,6 +67,27 @@ async function admitReview(requestUrl: string, pr: ReviewPayload): Promise<void>
 
 // Admit a durable `remember-pr` run, mirroring admitReview: POST the mounted
 // route (no `?wait`) so the webhook returns fast and curation runs durably.
+// Admit an auto-detected feedback curation run. Same pattern as admitRemember.
+async function admitFeedback(requestUrl: string, payload: FeedbackPayload): Promise<void> {
+  const base = resolveAdmitBase(process.env.INTERNAL_BASE_URL, requestUrl);
+  const res = await fetch(`${base}/workflows/feedback-pr`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = (await res.json().catch(() => ({}))) as { runId?: string };
+  if (!res.ok) {
+    throw new Error(`[mimir] feedback admit failed with status ${res.status}`);
+  }
+  console.log("[mimir] feedback admitted", {
+    owner: payload.owner,
+    repo: payload.repo,
+    prNumber: payload.prNumber,
+    status: res.status,
+    runId: body.runId,
+  });
+}
+
 async function admitRemember(requestUrl: string, payload: RememberPayload): Promise<void> {
   const base = resolveAdmitBase(process.env.INTERNAL_BASE_URL, requestUrl);
   const res = await fetch(`${base}/workflows/remember-pr`, {
@@ -188,27 +211,47 @@ export const channel = createGitHubChannel({
         return;
       }
 
-      // /remember — maintainer commits project memory.
+      // /remember or /feedback — maintainer commits project memory.
       const fact = parseRememberCommand(comment.body);
-      if (!fact) return;
-      if (!getDedupStore().claim(delivery.deliveryId)) {
-        console.log("[mimir] duplicate remember delivery skipped", delivery.deliveryId);
+      if (fact) {
+        if (!getDedupStore().claim(delivery.deliveryId)) {
+          console.log("[mimir] duplicate remember delivery skipped", delivery.deliveryId);
+          return;
+        }
+        // issue_comment lacks PR head info; fetch it to get the head ref + fork status.
+        const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+        if (pr.head.repo?.full_name !== `${owner}/${repo}`) {
+          await client.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: prNumber,
+            body: "[mimir] `/remember` is not supported for PRs from forks. Memory files must be committed to the base repository.",
+          });
+          return;
+        }
+        const source = `pr#${prNumber} by ${comment.user?.login ?? "unknown"}`;
+        await admitRemember(c.req.url, { owner, repo, prNumber, headRef: pr.head.ref, fact, source });
         return;
       }
-      // issue_comment lacks PR head info; fetch it to get the head ref + fork status.
-      const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
-      if (pr.head.repo?.full_name !== `${owner}/${repo}`) {
-        await client.rest.issues.createComment({
+
+      // Auto-detect maintainer feedback worth remembering (no explicit command).
+      if (isLikelyFeedback(comment.body)) {
+        const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+        if (pr.head.repo?.full_name !== `${owner}/${repo}`) return; // fork — can't push memory
+        if (!getDedupStore().claim(delivery.deliveryId)) {
+          console.log("[mimir] duplicate feedback delivery skipped", delivery.deliveryId);
+          return;
+        }
+        await admitFeedback(c.req.url, {
           owner,
           repo,
-          issue_number: prNumber,
-          body: "[mimir] `/remember` is not supported for PRs from forks. Memory files must be committed to the base repository.",
+          prNumber,
+          headRef: pr.head.ref,
+          commentBody: comment.body,
+          commentAuthor: comment.user?.login ?? "unknown",
         });
         return;
       }
-      const source = `pr#${prNumber} by ${comment.user?.login ?? "unknown"}`;
-      await admitRemember(c.req.url, { owner, repo, prNumber, headRef: pr.head.ref, fact, source });
-      return;
     }
 
     // `ping` and all other deliveries fall through to the channel's empty 200.

@@ -28,6 +28,18 @@ export function isMaintainer(association: string | undefined): boolean {
   return association !== undefined && MAINTAINER_ASSOCIATIONS.has(association);
 }
 
+// A non-trivial maintainer comment might contain actionable feedback. Skip short
+// replies ("LGTM", "thanks", "+1") and known commands — the curator makes the
+// final call. Language-agnostic: any language can have valuable feedback.
+export function isLikelyFeedback(body: string): boolean {
+  const trimmed = body.trim();
+  // Must be substantive enough to justify a curator call.
+  if (trimmed.length < 40) return false;
+  // Skip if it starts with a known slash-command.
+  if (/^\s*\/(remember|feedback|review)\b/i.test(trimmed)) return false;
+  return true;
+}
+
 export function hasSkipMarker(commitMessage: string): boolean {
   const lower = commitMessage.toLowerCase();
   return SKIP_MARKERS.some((m) => lower.includes(m));
@@ -52,14 +64,19 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Parse `/remember <fact>` or `@<handle> remember <fact>` (handle configurable,
-// since the bot's GitHub login may not be "mimir"). Returns the fact, or null.
+// Parse `/remember <fact>`, `/feedback <fact>`, or `@<handle> remember|feedback <fact>`
+// (handle configurable, since the bot's GitHub login may not be "mimir").
+// `/feedback` is an alias for `/remember` — both store project memory.
+// Returns the fact, or null.
 export function parseRememberCommand(
   body: string,
   handle = process.env.MIMIR_HANDLE ?? "mimir",
 ): string | null {
   const h = escapeRegExp(handle.replace(/^@/, ""));
-  const re = new RegExp(`(?:^|\\s)(?:/remember|@${h}\\s+remember)\\s+(.+)`, "is");
+  const re = new RegExp(
+    `(?:^|\\s)(?:/remember|/feedback|@${h}\\s+remember|@${h}\\s+feedback)\\s+(.+)`,
+    "is",
+  );
   const fact = body.match(re)?.[1]?.trim();
   return fact || null;
 }
