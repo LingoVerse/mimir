@@ -14,11 +14,6 @@ function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 120_000
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-interface JudgeResponseItem {
-  index: number;
-  score: number;
-  reason: string;
-}
 
 function buildJudgePrompt(fixture: EvalFixture, review: ReviewResult): string {
   if (review.findings.length === 0) return "";
