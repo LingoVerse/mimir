@@ -11,23 +11,27 @@ import type { EvalFixture } from "./types.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-function loadRubric(): string {
-  return readFileSync(join(__dirname, "../src/skills/review-rubric/SKILL.md"), "utf8");
-}
-
-function loadSecuritySkill(): string {
-  return readFileSync(join(__dirname, "../src/skills/security-check/SKILL.md"), "utf8");
+export function loadSkills(): { rubric: string; securitySkill: string } {
+  return {
+    rubric: readFileSync(join(__dirname, "../src/skills/review-rubric/SKILL.md"), "utf8"),
+    securitySkill: readFileSync(join(__dirname, "../src/skills/security-check/SKILL.md"), "utf8"),
+  };
 }
 
 function stripModelPrefix(model: string): string {
   return model.replace(/^openrouter\//, "");
 }
 
+function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 120_000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 function renderFixtureDiff(fixture: EvalFixture): string {
   return fixture.files
     .map((f) => {
-      const rename = "";
-      const header = `### ${f.filename}${rename} — ${f.status}, +${f.additions} -${f.deletions}`;
+      const header = `### ${f.filename} — ${f.status}, +${f.additions} -${f.deletions}`;
       return f.patch ? `${header}\n\n${f.patch}` : `${header}\n\n(no patch)`;
     })
     .join("\n\n");
@@ -58,7 +62,7 @@ async function callOpenRouter(
   apiKey: string,
 ): Promise<{ raw: unknown; durationMs: number }> {
   const start = Date.now();
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -89,10 +93,9 @@ export async function runFixture(
   fixture: EvalFixture,
   model: string,
   apiKey: string,
+  skills: { rubric: string; securitySkill: string },
 ): Promise<RunFixtureResult> {
-  const rubric = loadRubric();
-  const securitySkill = loadSecuritySkill();
-  const prompt = buildEvalPrompt(fixture, rubric, securitySkill);
+  const prompt = buildEvalPrompt(fixture, skills.rubric, skills.securitySkill);
   const { raw, durationMs } = await callOpenRouter(model, prompt, apiKey);
   const result = v.safeParse(ReviewResultSchema, raw);
   if (!result.success) {
@@ -103,8 +106,9 @@ export async function runFixture(
   return { review: result.output, durationMs, model };
 }
 
-// Compute recall: fraction of expected findings that were caught.
-// A finding is "caught" if any generated finding matches on file and contains a keyword.
+// Compute recall: fraction of expected findings that were caught by the model.
+// A finding is "caught" if any generated finding contains a keyword match in its
+// title or body. No file-level filtering — matches across all generated findings.
 export function computeRecall(
   fixture: EvalFixture,
   review: ReviewResult,

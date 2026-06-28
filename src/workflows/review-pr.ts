@@ -168,7 +168,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
       },
       review.findings,
     );
-  } catch { /* non-critical; log and continue */ }
+  } catch (err) { logEvent(log, "logReviewRun failed", { error: String(err) }); }
 
   return {
     pr: payload,

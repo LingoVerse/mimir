@@ -13,7 +13,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runFixture, computeRecall } from "./runner.ts";
+import { runFixture, loadSkills, computeRecall } from "./runner.ts";
 import { judgeFindings, computePrecision } from "./judge.ts";
 import { renderReport } from "./report.ts";
 import type { EvalFixture, EvalResult } from "./types.ts";
@@ -74,20 +74,28 @@ async function main(): Promise<void> {
   if (!noJudge) console.log(`Judge model: ${judgeModel}`);
   console.log("");
 
+  // Load SKILL.md files once — reused for every fixture.
+  const skills = loadSkills();
+
   const results: EvalResult[] = [];
+  let errorCount = 0;
 
   for (const fixture of fixtures) {
     process.stdout.write(`  [${fixture.id}] ${fixture.name} ... `);
     try {
-      const { review, durationMs } = await runFixture(fixture, model, apiKey);
+      const { review, durationMs } = await runFixture(fixture, model, apiKey, skills);
       const recall = computeRecall(fixture, review);
 
-      let judgeScores = noJudge ? [] : await judgeFindings(fixture, review, judgeModel, apiKey);
-      const precision = noJudge ? 1 : computePrecision(judgeScores);
+      const judgeScores = noJudge
+        ? []
+        : await judgeFindings(fixture, review, judgeModel, apiKey);
+
+      // NaN signals "not measured" to the report formatter.
+      const precision = noJudge ? NaN : computePrecision(judgeScores, review.findings.length);
       const avgRelevance =
         judgeScores.length > 0
           ? judgeScores.reduce((a, s) => a + s.score, 0) / judgeScores.length
-          : 0;
+          : NaN;
 
       results.push({
         fixtureId: fixture.id,
@@ -105,11 +113,16 @@ async function main(): Promise<void> {
         `done (${review.findings.length} findings, recall ${(recall * 100).toFixed(0)}%, ${durationMs}ms)`,
       );
     } catch (err) {
+      errorCount++;
       console.log(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   console.log("\n" + renderReport(results));
+
+  if (results.length === 0) {
+    process.exit(1);
+  }
 }
 
 await main();

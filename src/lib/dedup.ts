@@ -159,43 +159,50 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
   }
 
   logReviewRun(record: Omit<ReviewRunRecord, "id" | "createdAt">, findings?: Finding[]): number {
-    const result = this.#db
-      .prepare(
-        `INSERT INTO review_runs
-          (pr_key, primary_model, primary_tokens, primary_cost_usd,
-           escalation_model, escalation_tokens, escalation_cost_usd,
-           file_count, changed_lines, truncated, security_sensitive,
-           escalated, escalation_reasons, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        record.prKey,
-        record.primaryModel,
-        record.primaryTokens,
-        record.primaryCostUsd,
-        record.escalationModel,
-        record.escalationTokens,
-        record.escalationCostUsd,
-        record.fileCount,
-        record.changedLines,
-        record.truncated,
-        record.securitySensitive,
-        record.escalated,
-        record.escalationReasons,
-        Date.now(),
-      );
-    const runId = Number(result.lastInsertRowid);
-    if (findings?.length) {
-      const insertFinding = this.#db.prepare(
-        `INSERT INTO review_findings (run_id, file, line, severity, title, body, suggestion, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      const now = Date.now();
-      for (const f of findings) {
-        insertFinding.run(runId, f.file, f.line ?? null, f.severity, f.title, f.body, f.suggestion ?? null, now);
+    this.#db.exec("BEGIN");
+    try {
+      const result = this.#db
+        .prepare(
+          `INSERT INTO review_runs
+            (pr_key, primary_model, primary_tokens, primary_cost_usd,
+             escalation_model, escalation_tokens, escalation_cost_usd,
+             file_count, changed_lines, truncated, security_sensitive,
+             escalated, escalation_reasons, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          record.prKey,
+          record.primaryModel,
+          record.primaryTokens,
+          record.primaryCostUsd,
+          record.escalationModel,
+          record.escalationTokens,
+          record.escalationCostUsd,
+          record.fileCount,
+          record.changedLines,
+          record.truncated,
+          record.securitySensitive,
+          record.escalated,
+          record.escalationReasons,
+          Date.now(),
+        );
+      const runId = Number(result.lastInsertRowid);
+      if (findings?.length) {
+        const insertFinding = this.#db.prepare(
+          `INSERT INTO review_findings (run_id, file, line, severity, title, body, suggestion, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        const now = Date.now();
+        for (const f of findings) {
+          insertFinding.run(runId, f.file, f.line ?? null, f.severity, f.title, f.body, f.suggestion ?? null, now);
+        }
       }
+      this.#db.exec("COMMIT");
+      return runId;
+    } catch (e) {
+      this.#db.exec("ROLLBACK");
+      throw e;
     }
-    return runId;
   }
 
   getRunFindings(runId: number): FindingRecord[] {

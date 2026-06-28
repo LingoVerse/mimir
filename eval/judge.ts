@@ -8,6 +8,12 @@ function stripModelPrefix(model: string): string {
   return model.replace(/^openrouter\//, "");
 }
 
+function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 120_000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 interface JudgeResponseItem {
   index: number;
   score: number;
@@ -42,7 +48,7 @@ function buildJudgePrompt(fixture: EvalFixture, review: ReviewResult): string {
     "Findings to rate:",
     findingsList,
     "",
-    'Output a JSON array only, no prose: [{ "index": 1, "score": N, "reason": "one sentence" }, ...]',
+    'Output JSON only: { "scores": [{ "index": 1, "score": N, "reason": "one sentence" }, ...] }',
   ].join("\n");
 }
 
@@ -59,7 +65,7 @@ export async function judgeFindings(
   if (review.findings.length === 0) return [];
 
   const prompt = buildJudgePrompt(fixture, review);
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const res = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -76,7 +82,7 @@ export async function judgeFindings(
     throw new Error(`Judge OpenRouter ${res.status}: ${body}`);
   }
   const data = (await res.json()) as OpenRouterResponse;
-  const content = data.choices[0]?.message.content ?? "[]";
+  const content = data.choices[0]?.message.content ?? "{}";
 
   let parsed: unknown;
   try {
@@ -85,13 +91,12 @@ export async function judgeFindings(
     throw new Error(`Judge returned invalid JSON: ${content.slice(0, 200)}`);
   }
 
-  // The judge might return { scores: [...] } or directly an array.
-  const arr: unknown = Array.isArray(parsed)
-    ? parsed
-    : (parsed as Record<string, unknown>).scores ?? (parsed as Record<string, unknown>).findings ?? [];
-
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Judge response is not an object: ${JSON.stringify(parsed).slice(0, 200)}`);
+  }
+  const arr = (parsed as Record<string, unknown>).scores;
   if (!Array.isArray(arr)) {
-    throw new Error(`Judge response is not an array: ${JSON.stringify(parsed).slice(0, 200)}`);
+    throw new Error(`Judge response missing "scores" array: ${JSON.stringify(parsed).slice(0, 200)}`);
   }
 
   return (arr as JudgeResponseItem[]).map((item) => ({
@@ -101,9 +106,11 @@ export async function judgeFindings(
   }));
 }
 
-// Precision: fraction of findings the judge rated >= 3 (i.e., real issues).
-export function computePrecision(scores: JudgeScore[]): number {
-  if (scores.length === 0) return 1; // no findings = no false positives
+// Precision: judge-approved findings (score >= 3) divided by TOTAL findings
+// generated — not just those the judge returned scores for. LLMs sometimes omit
+// items silently; using the actual finding count prevents that from inflating precision.
+export function computePrecision(scores: JudgeScore[], totalFindings: number): number {
+  if (totalFindings === 0) return 1; // no findings = no false positives
   const approved = scores.filter((s) => s.score >= 3).length;
-  return approved / scores.length;
+  return approved / totalFindings;
 }
