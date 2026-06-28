@@ -1,10 +1,10 @@
 # Mimir
 
-Self-hosted GitHub **pull-request reviewer**. On each PR, Mimir fetches the diff, reviews it
-against a markdown rubric (with a deeper security pass on sensitive changes), escalates hard
-diffs to a stronger model, and posts a **summary comment + inline comments**. Read-only on
-code — it comments, humans decide. Model-agnostic via **OpenRouter**; a drop-in replacement
-for the consumer Gemini Code Assist GitHub reviewer.
+Self-hosted GitHub **pull-request reviewer** with persistent project memory and an
+auto-learning feedback loop. On each PR, Mimir fetches the diff, reviews it against a
+markdown rubric (with a deeper security pass on sensitive changes), escalates hard diffs
+to a stronger model, and posts a **summary comment + inline comments**. Read-only on code —
+it comments, humans decide. Model-agnostic via **OpenRouter**.
 
 > _Mimir_ — in Norse myth, the wise severed head Odin consults before every decision. A
 > reviewer is the counsel you consult before merging; and a head with no body is _headless_,
@@ -13,21 +13,46 @@ for the consumer Gemini Code Assist GitHub reviewer.
 ## How it works
 
 ```
-GitHub webhook
-  → verify signature + dedup delivery        (channels/github.ts)
-  → fetch & chunk diff, skip generated/vendored + `.mimirignore`  (lib/diff.ts, lib/ignore.ts)
-  → load project context: the repo's own conventions/memory from the base branch,
-      + read-only repo tools so the model can pull related code the diff omits
-      (lib/project-context.ts, lib/repo-tools.ts)
-  → primary review on a cheap model               (workflows/review-pr.ts + skills/)
-      rubric always; security-check on sensitive paths
-  → escalate to a stronger model when the diff is  (lib/escalation.ts)
-      big / security-sensitive / low-confidence / has a critical finding
-  → post summary + inline comments, idempotently   (lib/post-review.ts)
+GitHub webhook                                           (channels/github.ts)
+  → verify signature + dedup delivery
+  → fetch and chunk diff, skip generated/vendored + `.mimirignore`
+                                                         (lib/diff.ts, lib/ignore.ts)
+  → load project context: conventions, memory, project tree from the base branch
+     + read-only repo tools (head-ref search, file read, ls)
+                                                         (lib/project-context.ts, lib/repo-tools.ts)
+  → primary review on a cheap model                       (workflows/review-pr.ts + skills/)
+     rubric always; security-check on sensitive paths
+  → escalate to a stronger model when:                    (lib/escalation.ts)
+     • diff is large (>400 lines)
+     • security-sensitive paths changed
+     • primary model confidence is low
+     • critical finding found
+     (escalation receives primary findings + scope files; retries on 429/503)
+  → post summary + inline comments, idempotently           (lib/post-review.ts)
+  → log review stats to SQLite for the admin endpoint      (lib/dedup.ts)
 ```
 
 Built on **Flue** (Node runtime), **OpenRouter** (LLM gateway), **octokit** (GitHub API),
-and **SQLite** (delivery dedup + summary-comment tracking).
+and **SQLite** (delivery dedup + summary-comment tracking + review stats).
+
+### Memory & feedback loop
+
+Mimir maintains **durable project memory** in `.mimir/memory/*.md` on the base branch,
+injected into every review as context. Three triggers write to it:
+
+| Trigger | How | Source |
+|---------|-----|--------|
+| **`/remember <fact>`** | Explicit command in a PR comment | `command` |
+| **`/feedback <fact>`** | Alias for `/remember` | `command` |
+| **Auto-detect** | Any substantive (>40 chars) maintainer PR comment — the curator decides | `observed` |
+
+The memory-curator skill (AI-driven) extracts the decision, convention, or gotcha and commits
+it as a well-scoped markdown file. Future reviews see it through `fetchProjectContext()`.
+
+### Admin endpoint
+
+Open `GET /workflows/admin` in your browser to see recent review runs: models used, token
+cost, file counts, escalation reasons. Data lives in the same SQLite database.
 
 ## Quick start (local)
 
@@ -54,11 +79,13 @@ startup** and refuses to boot if a required var is missing or malformed.
 | `MODEL_PRIMARY`             |          | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR                                    |
 | `MODEL_ESCALATION`          |          | `openrouter/z-ai/glm-5.2`                  | stronger pass on hard diffs                                     |
 | `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                            |
+| `ESCALATE_SECURITY_ALWAYS`  |          | `true`                                     | always escalate on security-sensitive paths (vs only when findings exist) |
 | `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                   |
 | `REPO_TOOL_CALL_BUDGET`     |          | auto                                       | pin per-pass repo-tool calls (else scales ~1/reviewed file)     |
 | `REPO_TOOL_CALL_BUDGET_MAX` |          | `40`                                       | cap when the tool-call budget auto-scales with PR size          |
 | `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                               |
 | `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review |
+| `MIMIR_HANDLE`              |          | `mimir`                                    | GitHub handle for `@handle remember` / `@handle review` commands |
 | `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or a bare path)                    |
 | `INTERNAL_BASE_URL`         |          | request origin                             | loopback used to admit review runs behind a proxy               |
 
@@ -66,12 +93,16 @@ startup** and refuses to boot if a required var is missing or malformed.
 
 ```
 src/
-  channels/github.ts      verified webhook ingress; dedup + admit a review run
-  workflows/review-pr.ts  resolve PR → diff → skills → primary → escalate → post
-  skills/                 review-rubric, security-check  (Agent Skills, bundled)
-  lib/                    github, diff, dedup, review, security-paths,
-                          escalation, post-review, env,
-                          project-context, repo-tools   (context beyond the diff)
+  channels/github.ts          verified webhook ingress; dedup + admit runs
+  workflows/review-pr.ts      primary → escalate → post
+  workflows/remember-pr.ts    /remember command → curator → commit memory
+  workflows/feedback-pr.ts    auto-detect maintainer feedback → curator → commit
+  workflows/admin.ts          GET /workflows/admin — review run history
+  skills/                     review-rubric, security-check, memory-curator
+  lib/                        diff, dedup, escalation, env, github, ignore,
+                              instruction, log, memory, post-review,
+                              project-context, repo-tools, retry, review,
+                              security-paths
 ```
 
 Workflows and channels are discovered by flat filename in their dirs; everything else is `lib/`.
@@ -90,8 +121,10 @@ Tests run under `node --test` (matching the Node runtime, where `node:sqlite` is
   Bun is only the package manager (flue runs under Node via its bin shebang). Deploy is Node.
 - **OpenRouter is a built-in Flue provider** — no registration code, just `OPENROUTER_API_KEY`;
   specifiers look like `openrouter/<vendor>/<model>`.
-- **Dual-model.** Every PR gets the cheap pass; escalation re-reviews the whole diff on the
-  stronger model and replaces the result (also double-checking critical claims).
+- **Dual-model + scoped escalation.** Every PR gets the cheap pass; escalation re-reviews on the
+  stronger model and replaces the result. When triggered by specific findings (critical severity,
+  security-sensitive paths), only the relevant files are scoped — the model gets the full diff
+  for context but a "focus" directive to concentrate its effort.
 - **Idempotency.** Webhook deliveries are claimed in SQLite (replays skipped); the summary
   comment id is stored so a re-push updates one comment instead of stacking new ones.
 - **`.mimirignore`.** A repo can drop generated artefacts from review (e.g. a 3k-line Drizzle
@@ -108,9 +141,11 @@ Tests run under `node --test` (matching the Node runtime, where `node:sqlite` is
   ```
 - **Context beyond the diff.** The reviewer reads the project's own agent-guidance
   (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `.mimir/memory/*`) from the
-  base branch, and has read-only, repo-scoped tools (`read_repo_file`, `list_repo_dir`,
-  `search_repo`) to pull related code a diff can't show. Read-only; untrusted PR code is never
-  executed. (Writing memory back into the PR is a separate, maintainer-gated step — planned.)
+  base branch, plus the **full project tree** (directory structure of the head ref), and has
+  read-only, repo-scoped tools (`read_repo_file`, `list_repo_dir`, `search_repo`) to pull
+  related code. `search_repo` searches the **PR head ref** (not the default branch) — new code
+  in the PR is findable. Memory is writeable via `/remember` and `/feedback` commands (maintainer-
+  gated). Read-only; untrusted PR code is never executed.
 
 ## Non-goals
 
