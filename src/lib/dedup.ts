@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { Finding } from "./review.ts";
 
 export interface ReviewRunRecord {
   id: number;
@@ -18,6 +19,22 @@ export interface ReviewRunRecord {
   escalated: number;
   escalationReasons: string;
   createdAt: number;
+}
+
+export interface FindingRecord {
+  id: number;
+  runId: number;
+  file: string;
+  line: number | null;
+  severity: string;
+  title: string;
+  body: string;
+  suggestion: string | null;
+  createdAt: number;
+}
+
+export interface RunWithFindings extends ReviewRunRecord {
+  findings: FindingRecord[];
 }
 
 // Idempotency guard. GitHub does not dedupe delivery IDs and the channel is
@@ -40,9 +57,12 @@ export interface SummaryCommentStore {
 }
 
 export interface ReviewRunStore {
-  logReviewRun(record: Omit<ReviewRunRecord, "id" | "createdAt">): void;
+  // Returns the new run's ID so callers can associate findings with it.
+  logReviewRun(record: Omit<ReviewRunRecord, "id" | "createdAt">, findings?: Finding[]): number;
   getRecentRuns(limit?: number): ReviewRunRecord[];
   getStats(): { totalRuns: number; totalCost: number; avgCost: number };
+  getRunFindings(runId: number): FindingRecord[];
+  exportRunsWithFindings(limit?: number): RunWithFindings[];
 }
 
 // Accept `sqlite:./path.db`, `sqlite:///abs/path.db`, a bare path, or default.
@@ -93,6 +113,22 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
         created_at INTEGER NOT NULL
       )`,
     );
+    this.#db.exec(
+      `CREATE TABLE IF NOT EXISTS review_findings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        file TEXT NOT NULL,
+        line INTEGER,
+        severity TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        suggestion TEXT,
+        created_at INTEGER NOT NULL
+      )`,
+    );
+    this.#db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_review_findings_run_id ON review_findings (run_id)",
+    );
   }
 
   claim(deliveryId: string): boolean {
@@ -122,8 +158,8 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
       .run(prKey, commentId, Date.now());
   }
 
-  logReviewRun(record: Omit<ReviewRunRecord, "id" | "createdAt">): void {
-    this.#db
+  logReviewRun(record: Omit<ReviewRunRecord, "id" | "createdAt">, findings?: Finding[]): number {
+    const result = this.#db
       .prepare(
         `INSERT INTO review_runs
           (pr_key, primary_model, primary_tokens, primary_cost_usd,
@@ -148,6 +184,43 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
         record.escalationReasons,
         Date.now(),
       );
+    const runId = Number(result.lastInsertRowid);
+    if (findings?.length) {
+      const insertFinding = this.#db.prepare(
+        `INSERT INTO review_findings (run_id, file, line, severity, title, body, suggestion, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const now = Date.now();
+      for (const f of findings) {
+        insertFinding.run(runId, f.file, f.line ?? null, f.severity, f.title, f.body, f.suggestion ?? null, now);
+      }
+    }
+    return runId;
+  }
+
+  getRunFindings(runId: number): FindingRecord[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT id, run_id, file, line, severity, title, body, suggestion, created_at
+         FROM review_findings WHERE run_id = ? ORDER BY id`,
+      )
+      .all(runId) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: Number(r.id),
+      runId: Number(r.run_id),
+      file: String(r.file),
+      line: r.line != null ? Number(r.line) : null,
+      severity: String(r.severity),
+      title: String(r.title),
+      body: String(r.body),
+      suggestion: r.suggestion != null ? String(r.suggestion) : null,
+      createdAt: Number(r.created_at),
+    }));
+  }
+
+  exportRunsWithFindings(limit = 100): RunWithFindings[] {
+    const runs = this.getRecentRuns(limit);
+    return runs.map((run) => ({ ...run, findings: this.getRunFindings(run.id) }));
   }
 
   getRecentRuns(limit = 20): ReviewRunRecord[] {

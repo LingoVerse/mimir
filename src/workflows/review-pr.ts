@@ -150,21 +150,24 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
 
   // Store review run stats for the admin endpoint.
   try {
-    getReviewRunStore().logReviewRun({
-      prKey: `${payload.owner}/${payload.repo}#${payload.number}`,
-      primaryModel: primaryResult.model.id,
-      primaryTokens: primaryResult.usage.input + primaryResult.usage.output,
-      primaryCostUsd: primaryResult.usage.cost.total,
-      escalationModel: escalationResult?.model.id ?? null,
-      escalationTokens: escalationResult ? escalationResult.usage.input + escalationResult.usage.output : null,
-      escalationCostUsd: escalationResult?.usage.cost.total ?? null,
-      fileCount: diff.files.length,
-      changedLines: diff.totalChangedLines,
-      truncated: diff.truncated?.omitted.length ?? 0,
-      securitySensitive: securitySensitive ? 1 : 0,
-      escalated: decision.escalate ? 1 : 0,
-      escalationReasons: decision.reasons.join(", "),
-    });
+    getReviewRunStore().logReviewRun(
+      {
+        prKey: `${payload.owner}/${payload.repo}#${payload.number}`,
+        primaryModel: primaryResult.model.id,
+        primaryTokens: primaryResult.usage.input + primaryResult.usage.output,
+        primaryCostUsd: primaryResult.usage.cost.total,
+        escalationModel: escalationResult?.model.id ?? null,
+        escalationTokens: escalationResult ? escalationResult.usage.input + escalationResult.usage.output : null,
+        escalationCostUsd: escalationResult?.usage.cost.total ?? null,
+        fileCount: diff.files.length,
+        changedLines: diff.totalChangedLines,
+        truncated: diff.truncated?.omitted.length ?? 0,
+        securitySensitive: securitySensitive ? 1 : 0,
+        escalated: decision.escalate ? 1 : 0,
+        escalationReasons: decision.reasons.join(", "),
+      },
+      review.findings,
+    );
   } catch { /* non-critical; log and continue */ }
 
   return {

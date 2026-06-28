@@ -1,0 +1,27 @@
+{
+  "id": "004",
+  "name": "SQL injection via string interpolation",
+  "files": [
+    {
+      "filename": "src/api/users.ts",
+      "status": "modified",
+      "additions": 11,
+      "deletions": 1,
+      "patch": "@@ -8,9 +8,19 @@ export async function getUser(id: string): Promise<User | null> {\n   return db.queryOne(\"SELECT * FROM users WHERE id = $1\", [id]);\n }\n \n+export async function searchUsers(query: string, role?: string): Promise<User[]> {\n+  let sql = `SELECT * FROM users WHERE (name ILIKE '%${query}%' OR email ILIKE '%${query}%')`;\n+  if (role) {\n+    sql += ` AND role = '${role}'`;\n+  }\n+  const results = await db.query(sql);\n+  return results.rows;\n+}\n \n export async function deleteUser(id: string): Promise<void> {\n-  await db.exec(\"DELETE FROM users WHERE id = $1\", [id]);\n+  await db.exec(`DELETE FROM users WHERE id = ${id}`);\n }"
+    }
+  ],
+  "changedLines": 12,
+  "securitySensitive": false,
+  "expectedFindings": [
+    {
+      "mustMatchKeywords": ["injection", "sql", "template", "interpolat", "parameteriz"],
+      "severity": "critical",
+      "description": "searchUsers builds SQL via template literal string interpolation — both query and role parameters are injectable"
+    },
+    {
+      "mustMatchKeywords": ["injection", "sql", "template", "interpolat", "parameteriz", "deleteUser"],
+      "severity": "critical",
+      "description": "deleteUser was changed from parameterized to string interpolation — id is directly injectable"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "001",
+  "name": "Null dereference on DB lookup result",
+  "files": [
+    {
+      "filename": "src/services/user.ts",
+      "status": "modified",
+      "additions": 6,
+      "deletions": 1,
+      "patch": "@@ -10,9 +10,14 @@ export class UserService {\n \n   async getUserProfile(userId: string): Promise<UserProfile> {\n     const user = await this.db.users.findFirst({ where: { id: userId } });\n-    return { name: user.name, email: user.email };\n+    return {\n+      name: user.profile.displayName,\n+      email: user.profile.contactEmail,\n+      avatar: user.profile.avatarUrl,\n+      bio: user.profile.bio ?? \"\",\n+      joinedAt: user.createdAt,\n+    };\n   }\n }"
+    }
+  ],
+  "changedLines": 7,
+  "securitySensitive": false,
+  "expectedFindings": [
+    {
+      "mustMatchKeywords": ["null", "undefined", "findFirst", "not found"],
+      "severity": "critical",
+      "description": "user returned by findFirst can be null; accessing user.profile without a guard will throw at runtime"
+    }
+  ]
+}
