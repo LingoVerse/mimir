@@ -120,7 +120,7 @@ async function main(): Promise<void> {
 
   console.log("\n" + renderReport(results));
 
-  if (results.length === 0) {
+  if (results.length === 0 || errorCount > 0) {
     process.exit(1);
   }
 }

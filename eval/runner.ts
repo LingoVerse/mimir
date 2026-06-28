@@ -79,7 +79,7 @@ async function callOpenRouter(
     throw new Error(`OpenRouter ${res.status}: ${body}`);
   }
   const data = (await res.json()) as OpenRouterResponse;
-  const content = data.choices[0]?.message.content ?? "{}";
+  const content = data.choices?.[0]?.message.content ?? "{}";
   return { raw: JSON.parse(content), durationMs: Date.now() - start };
 }
 
@@ -99,9 +99,12 @@ export async function runFixture(
   const { raw, durationMs } = await callOpenRouter(model, prompt, apiKey);
   const result = v.safeParse(ReviewResultSchema, raw);
   if (!result.success) {
-    throw new Error(
-      `Model output failed schema validation for fixture ${fixture.id}: ${v.flatten(result.issues).root?.join(", ")}`,
-    );
+    const flat = v.flatten(result.issues);
+    const errors = [
+      ...(flat.root ?? []),
+      ...Object.entries(flat.nested ?? {}).map(([path, msgs]) => `${path}: ${(msgs ?? []).join(", ")}`),
+    ].join("; ");
+    throw new Error(`Model output failed schema validation for fixture ${fixture.id}: ${errors}`);
   }
   return { review: result.output, durationMs, model };
 }

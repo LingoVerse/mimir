@@ -82,7 +82,7 @@ export async function judgeFindings(
     throw new Error(`Judge OpenRouter ${res.status}: ${body}`);
   }
   const data = (await res.json()) as OpenRouterResponse;
-  const content = data.choices[0]?.message.content ?? "{}";
+  const content = data.choices?.[0]?.message.content ?? "{}";
 
   let parsed: unknown;
   try {
@@ -99,11 +99,18 @@ export async function judgeFindings(
     throw new Error(`Judge response missing "scores" array: ${JSON.stringify(parsed).slice(0, 200)}`);
   }
 
-  return (arr as JudgeResponseItem[]).map((item) => ({
-    findingIndex: Number(item.index) - 1, // convert 1-based to 0-based
-    score: Math.min(5, Math.max(1, Number(item.score))),
-    reason: String(item.reason ?? ""),
-  }));
+  return (arr as unknown[])
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item))
+    .map((item) => {
+      const idx = Number(item["index"]);
+      const sc = Number(item["score"]);
+      return {
+        findingIndex: Number.isNaN(idx) ? -1 : idx - 1, // convert 1-based to 0-based
+        score: Number.isNaN(sc) ? 1 : Math.min(5, Math.max(1, sc)),
+        reason: String(item["reason"] ?? ""),
+      };
+    })
+    .filter((item) => item.findingIndex >= 0);
 }
 
 // Precision: judge-approved findings (score >= 3) divided by TOTAL findings
