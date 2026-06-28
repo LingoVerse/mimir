@@ -4,12 +4,14 @@ import { decideEscalation } from "../lib/escalation.ts";
 import { client } from "../lib/github.ts";
 import { fetchIgnoreMatcher } from "../lib/ignore.ts";
 import { type ReviewPayload, buildInstruction } from "../lib/instruction.ts";
+import { getReviewRunStore } from "../lib/dedup.ts";
 import { logEvent } from "../lib/log.ts";
 import { postReview } from "../lib/post-review.ts";
 import { fetchProjectContext, fetchProjectTree } from "../lib/project-context.ts";
 import { repoContextTools } from "../lib/repo-tools.ts";
+import { withRetry } from "../lib/retry.ts";
 import { ReviewResultSchema } from "../lib/review.ts";
-import { touchesSensitivePath } from "../lib/security-paths.ts";
+import { listSensitiveFiles, touchesSensitivePath } from "../lib/security-paths.ts";
 import reviewRubric from "../skills/review-rubric/SKILL.md" with { type: "skill" };
 import securityCheck from "../skills/security-check/SKILL.md" with { type: "skill" };
 
@@ -39,7 +41,9 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     ref: payload.baseRef,
   });
   const diff = await fetchPrDiff(client, payload, { ignore });
-  const securitySensitive = touchesSensitivePath(diff.files.map((f) => f.filename));
+  const filenames = diff.files.map((f) => f.filename);
+  const securitySensitive = touchesSensitivePath(filenames);
+  const sensitiveFiles = listSensitiveFiles(filenames);
   // Read-only repo tools scoped to the PR head, so the model can pull related
   // code the diff omits. Each pass gets its OWN instance: the call budget lives
   // in the closure (repo-tools.ts), so a shared instance would let the primary
@@ -60,9 +64,10 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
 
   // 2. Primary pass on MODEL_PRIMARY.
   const harness = await init(reviewer);
-  const primaryResult = await (
-    await harness.session()
-  ).prompt(instruction, { result: ReviewResultSchema, tools });
+  const session = await harness.session();
+  const primaryResult = await withRetry(() =>
+    session.prompt(instruction, { result: ReviewResultSchema, tools }),
+  );
   const primary = primaryResult.data;
 
   // 3. Escalation decision (§5). Logged for cost/escalation-rate observability.
@@ -70,6 +75,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     totalChangedLines: diff.totalChangedLines,
     securitySensitive,
     review: primary,
+    sensitiveFiles,
   });
   logEvent(log, "escalation decision", {
     escalate: decision.escalate,
@@ -90,6 +96,7 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
       payload, diff, securitySensitive, projectContext,
       {
         projectTree,
+        scopeFiles: decision.scopeFiles,
         priorReview: {
           summary: primary.summary,
           findings: primary.findings,
@@ -97,11 +104,13 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
       },
     );
     const escalationSession = await harness.session("escalation");
-    escalationResult = await escalationSession.prompt(escalationInstruction, {
-      result: ReviewResultSchema,
-      model: ESCALATION_MODEL,
-      tools: repoContextTools(client, toolRef, diff.files.length),
-    });
+    escalationResult = await withRetry(() =>
+      escalationSession.prompt(escalationInstruction, {
+        result: ReviewResultSchema,
+        model: ESCALATION_MODEL,
+        tools: repoContextTools(client, toolRef, diff.files.length),
+      }),
+    );
     review = escalationResult.data;
   }
 
@@ -138,6 +147,25 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
     summaryUpdated: posted.summaryUpdated,
     inlinePosted: posted.inlinePosted,
   });
+
+  // Store review run stats for the admin endpoint.
+  try {
+    getReviewRunStore().logReviewRun({
+      prKey: `${payload.owner}/${payload.repo}#${payload.number}`,
+      primaryModel: primaryResult.model.id,
+      primaryTokens: primaryResult.usage.input + primaryResult.usage.output,
+      primaryCostUsd: primaryResult.usage.cost.total,
+      escalationModel: escalationResult?.model.id ?? null,
+      escalationTokens: escalationResult ? escalationResult.usage.input + escalationResult.usage.output : null,
+      escalationCostUsd: escalationResult?.usage.cost.total ?? null,
+      fileCount: diff.files.length,
+      changedLines: diff.totalChangedLines,
+      truncated: diff.truncated?.omitted.length ?? 0,
+      securitySensitive: securitySensitive ? 1 : 0,
+      escalated: decision.escalate ? 1 : 0,
+      escalationReasons: decision.reasons.join(", "),
+    });
+  } catch { /* non-critical; log and continue */ }
 
   return {
     pr: payload,

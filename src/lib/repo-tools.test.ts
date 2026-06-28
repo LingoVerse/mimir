@@ -41,11 +41,15 @@ test("repoContextTools returns the three read-only tools", () => {
   );
 });
 
-function makeClient(handler: () => unknown) {
+function makeClient(handler: () => unknown, getTreeHandler?: () => unknown) {
   return {
     rest: {
       repos: { getContent: async () => handler() },
       search: { code: async () => handler() },
+      git: {
+        getTree: async () =>
+          getTreeHandler?.() ?? { data: { tree: [{ path: "src/index.ts", type: "blob" }] } },
+      },
     },
   } as never;
 }

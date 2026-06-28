@@ -43,6 +43,8 @@ function errMessage(err: unknown): string {
 export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef, fileCount = 0) {
   const budget = resolveToolBudget(fileCount);
   let callCount = 0;
+  // Cached tree entries for search_repo (fetched once from the head ref).
+  let repoTree: string[] | null = null;
 
   function guardedExecute(
     toolName: string,
@@ -117,19 +119,25 @@ export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef,
   const searchRepo = defineTool({
     name: "search_repo",
     description:
-      "Search this repository (default branch) for a symbol or string. Returns matching file paths to read — use to locate definitions/usages related to the diff.",
+      "Search this repository (PR head ref) by file path for a symbol or string. Returns matching file paths to read — use to locate definitions/usages related to the diff. Searches the PR head so new code is visible.",
     parameters: v.object({
-      query: v.pipe(v.string(), v.description("Code search terms, e.g. a function or class name")),
+      query: v.pipe(v.string(), v.description("Search terms, e.g. a function or class name")),
     }),
     execute: async ({ query }) => {
       return guardedExecute("search_repo", query, async () => {
         try {
-          const { data } = await client.rest.search.code({
-            q: `${query} repo:${owner}/${repo}`,
-            per_page: MAX_SEARCH_RESULTS,
-          });
-          if (data.total_count === 0) return `No matches for: ${query}`;
-          return data.items.map((i) => i.path).join("\n");
+          if (repoTree === null) {
+            const { data } = await client.rest.git.getTree({
+              owner, repo, tree_sha: ref, recursive: "1",
+            });
+            repoTree = data.tree
+              .filter((e) => e.path && e.type === "blob")
+              .map((e) => e.path!);
+          }
+          const q = query.toLowerCase();
+          const matches = repoTree.filter((p) => p.toLowerCase().includes(q));
+          if (matches.length === 0) return `No matches for: ${query}`;
+          return matches.slice(0, MAX_SEARCH_RESULTS).join("\n");
         } catch (err) {
           return `Search unavailable for "${query}": ${errMessage(err)}`;
         }

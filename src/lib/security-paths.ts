@@ -54,3 +54,11 @@ export function touchesSensitivePath(paths: Iterable<string>): boolean {
   }
   return false;
 }
+
+export function listSensitiveFiles(paths: Iterable<string>): string[] {
+  const result: string[] = [];
+  for (const path of paths) {
+    if (isSecuritySensitivePath(path)) result.push(path);
+  }
+  return result;
+}
