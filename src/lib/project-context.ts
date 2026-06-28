@@ -32,6 +32,36 @@ export function buildContextBlock(files: ContextFile[], maxChars = DEFAULT_MAX_C
   return parts.join("\n\n");
 }
 
+// Fetch the full recursive git tree (all files + dirs) for a given ref, and return
+// it formatted as an indented tree. Used to orient the model on project structure.
+export async function fetchProjectTree(client: Octokit, ref: RepoRef): Promise<string> {
+  try {
+    const { data } = await client.rest.git.getTree({
+      owner: ref.owner,
+      repo: ref.repo,
+      tree_sha: ref.ref,
+      recursive: "1",
+    });
+    const lines: string[] = [];
+    // Sort: dirs first, then alphabetical
+    const sorted = [...data.tree].sort((a, b) => {
+      if (a.type !== b.type) return a.type === "tree" ? -1 : 1;
+      return (a.path ?? "").localeCompare(b.path ?? "");
+    });
+    for (const entry of sorted) {
+      if (!entry.path) continue;
+      const depth = entry.path.split("/").length - 1;
+      const indent = "  ".repeat(depth);
+      const name = entry.path.split("/").pop() ?? entry.path;
+      const suffix = entry.type === "tree" ? "/" : "";
+      lines.push(`${indent}${name}${suffix}`);
+    }
+    return lines.join("\n");
+  } catch {
+    return "(unavailable)";
+  }
+}
+
 async function readFile(client: Octokit, ref: RepoRef, path: string): Promise<ContextFile | null> {
   try {
     const { data } = await client.rest.repos.getContent({

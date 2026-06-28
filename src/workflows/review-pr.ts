@@ -6,7 +6,7 @@ import { fetchIgnoreMatcher } from "../lib/ignore.ts";
 import { type ReviewPayload, buildInstruction } from "../lib/instruction.ts";
 import { logEvent } from "../lib/log.ts";
 import { postReview } from "../lib/post-review.ts";
-import { fetchProjectContext } from "../lib/project-context.ts";
+import { fetchProjectContext, fetchProjectTree } from "../lib/project-context.ts";
 import { repoContextTools } from "../lib/repo-tools.ts";
 import { ReviewResultSchema } from "../lib/review.ts";
 import { touchesSensitivePath } from "../lib/security-paths.ts";
@@ -40,19 +40,22 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   });
   const diff = await fetchPrDiff(client, payload, { ignore });
   const securitySensitive = touchesSensitivePath(diff.files.map((f) => f.filename));
-  const projectContext = await fetchProjectContext(client, {
-    owner: payload.owner,
-    repo: payload.repo,
-    ref: payload.baseRef,
-  });
-  const instruction = buildInstruction(payload, diff, securitySensitive, projectContext);
-
   // Read-only repo tools scoped to the PR head, so the model can pull related
   // code the diff omits. Each pass gets its OWN instance: the call budget lives
   // in the closure (repo-tools.ts), so a shared instance would let the primary
   // pass starve the escalation pass of context reads. The escalation tools are
   // built lazily below, only when we actually escalate.
   const toolRef = { owner: payload.owner, repo: payload.repo, ref: payload.headSha };
+
+  const projectContext = await fetchProjectContext(client, {
+    owner: payload.owner,
+    repo: payload.repo,
+    ref: payload.baseRef,
+  });
+  const projectTree = await fetchProjectTree(client, toolRef);
+  const instruction = buildInstruction(payload, diff, securitySensitive, projectContext, {
+    projectTree,
+  });
   const tools = repoContextTools(client, toolRef, diff.files.length);
 
   // 2. Primary pass on MODEL_PRIMARY.
@@ -83,8 +86,18 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   let review = primary;
   let escalationResult: typeof primaryResult | null = null;
   if (decision.escalate) {
+    const escalationInstruction = buildInstruction(
+      payload, diff, securitySensitive, projectContext,
+      {
+        projectTree,
+        priorReview: {
+          summary: primary.summary,
+          findings: primary.findings,
+        },
+      },
+    );
     const escalationSession = await harness.session("escalation");
-    escalationResult = await escalationSession.prompt(instruction, {
+    escalationResult = await escalationSession.prompt(escalationInstruction, {
       result: ReviewResultSchema,
       model: ESCALATION_MODEL,
       tools: repoContextTools(client, toolRef, diff.files.length),
