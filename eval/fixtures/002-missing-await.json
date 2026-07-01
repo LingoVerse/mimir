@@ -1,0 +1,27 @@
+{
+  "id": "002",
+  "name": "Missing await on async call",
+  "files": [
+    {
+      "filename": "src/workers/order-processor.ts",
+      "status": "modified",
+      "additions": 9,
+      "deletions": 4,
+      "patch": "@@ -5,12 +5,17 @@ import { fetchOrder, chargeCard, sendReceipt } from \"./api.ts\";\n \n-function processOrder(orderId: string): PaymentResult {\n-  const order = getOrderSync(orderId);\n-  return chargeCard(order.cardToken, order.amount);\n-}\n+async function processOrder(orderId: string): Promise<PaymentResult> {\n+  const order = fetchOrder(orderId);\n+  if (!order) throw new Error(\"Order not found\");\n+  const result = await chargeCard(order.cardToken, order.amount);\n+  sendReceipt(order.customerEmail, result.transactionId);\n+  return result;\n+}\n \n export { processOrder };"
+    }
+  ],
+  "changedLines": 13,
+  "securitySensitive": false,
+  "expectedFindings": [
+    {
+      "mustMatchKeywords": ["await", "promise", "fetchOrder"],
+      "severity": "critical",
+      "description": "fetchOrder returns Promise<Order> but is called without await; order is a Promise object, the null check is always false, cardToken and amount are undefined"
+    },
+    {
+      "mustMatchKeywords": ["await", "sendReceipt", "promise"],
+      "severity": "minor",
+      "description": "sendReceipt is async but called without await; errors are silently swallowed"
+    }
+  ]
+}

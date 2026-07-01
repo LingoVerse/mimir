@@ -1,0 +1,27 @@
+{
+  "id": "005",
+  "name": "Missing authentication on admin endpoint",
+  "files": [
+    {
+      "filename": "src/routes/admin.ts",
+      "status": "modified",
+      "additions": 13,
+      "deletions": 0,
+      "patch": "@@ -12,6 +12,19 @@ router.get(\"/api/users/:id\", requireAuth, async (req, res) => {\n   res.json(user);\n });\n \n+router.delete(\"/api/admin/users/:id\", async (req, res) => {\n+  try {\n+    await userService.permanentlyDelete(req.params.id);\n+    res.json({ success: true, deletedId: req.params.id });\n+  } catch (err) {\n+    res.status(500).json({ error: \"Delete failed\" });\n+  }\n+});\n+\n+router.post(\"/api/admin/users/:id/impersonate\", async (req, res) => {\n+  const token = await authService.createImpersonationToken(req.params.id);\n+  res.json({ token });\n+});"
+    }
+  ],
+  "changedLines": 13,
+  "securitySensitive": true,
+  "expectedFindings": [
+    {
+      "mustMatchKeywords": ["auth", "authentication", "middleware", "requireAuth", "unauthenticated", "protected"],
+      "severity": "critical",
+      "description": "DELETE /api/admin/users/:id performs permanent deletion with no authentication — any unauthenticated request can delete users"
+    },
+    {
+      "mustMatchKeywords": ["auth", "authentication", "middleware", "requireAuth", "impersonat"],
+      "severity": "critical",
+      "description": "POST impersonate endpoint issues auth tokens with no authentication — anyone can impersonate any user"
+    }
+  ]
+}

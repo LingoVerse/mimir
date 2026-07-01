@@ -7,9 +7,12 @@
     "dev": "flue dev --target node",
     "build": "flue build --target node",
     "typecheck": "tsc --noEmit",
-    "test": "node --test 'src/**/*.test.ts'",
+    "test": "node --test 'src/**/*.test.ts' 'eval/**/*.test.ts'",
     "lint": "oxlint",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "eval": "node eval/index.ts",
+    "eval:no-judge": "node eval/index.ts --no-judge",
+    "export-eval-data": "node scripts/export-eval-data.ts"
   },
   "dependencies": {
     "@flue/github": "^1.0.0-beta.1",
