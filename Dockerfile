@@ -27,8 +27,7 @@ FROM node:24-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
-    DATABASE_URL=sqlite:/data/mimir.db \
-    INTERNAL_BASE_URL=http://127.0.0.1:3000
+    DATABASE_URL=sqlite:/data/mimir.db
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

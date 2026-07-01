@@ -9,7 +9,7 @@ services:
       - "3000:3000"
     # Supplies OPENROUTER_API_KEY, GITHUB_WEBHOOK_SECRET, GITHUB_TOKEN,
     # MODEL_PRIMARY/MODEL_ESCALATION, POST_NITS, etc. (see .env.example).
-    # DATABASE_URL / INTERNAL_BASE_URL default to in-container values.
+    # DATABASE_URL defaults to an in-container value.
     env_file: .env
     volumes:
       - mimir-data:/data

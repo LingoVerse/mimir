@@ -26,10 +26,6 @@ test("throws naming each missing required var", () => {
 test("rejects malformed optional vars", () => {
   assert.throws(() => validateEnv({ ...base, ESCALATION_DIFF_THRESHOLD: "abc" }), /whole number/);
   assert.throws(() => validateEnv({ ...base, POST_NITS: "yes" }), /POST_NITS/);
-  assert.throws(
-    () => validateEnv({ ...base, INTERNAL_BASE_URL: "not-a-url" }),
-    /INTERNAL_BASE_URL/,
-  );
 });
 
 test("accepts valid optional vars", () => {
@@ -38,7 +34,6 @@ test("accepts valid optional vars", () => {
       ...base,
       ESCALATION_DIFF_THRESHOLD: "400",
       POST_NITS: "true",
-      INTERNAL_BASE_URL: "http://127.0.0.1:3000",
     }),
   );
 });

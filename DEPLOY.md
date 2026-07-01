@@ -60,11 +60,10 @@ refuses to start** if a required var is missing or malformed (the error names wh
 
 - **Required:** `OPENROUTER_API_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`
 - **Optional:** `MODEL_PRIMARY`, `MODEL_ESCALATION`, `ESCALATION_DIFF_THRESHOLD`,
-  `DIFF_MAX_TOKENS`, `POST_NITS`, `DATABASE_URL`, `INTERNAL_BASE_URL` (see the README table)
+  `DIFF_MAX_TOKENS`, `POST_NITS`, `DATABASE_URL` (see the README table)
 
-In the Docker image, `DATABASE_URL=sqlite:/data/mimir.db` and
-`INTERNAL_BASE_URL=http://127.0.0.1:3000` are preset. **Mount a volume at `/data`** so dedup +
-comment-id state survives restarts.
+In the Docker image, `DATABASE_URL=sqlite:/data/mimir.db` is preset. **Mount a volume at
+`/data`** so dedup + comment-id state survives restarts.
 
 ## 4. Deploy
 
@@ -129,4 +128,3 @@ The Docker / Node deploy is the current recommended production path.
 | Webhook `401`                       | secret mismatch between GitHub and `GITHUB_WEBHOOK_SECRET`                           |
 | Webhook `415`                       | content type isn't `application/json`                                                |
 | No comments / `403` from GitHub     | `GITHUB_TOKEN` lacks **Pull requests: write** (or `repo`), or no access to that repo |
-| Reviews never start behind a proxy  | set `INTERNAL_BASE_URL` to the container loopback, e.g. `http://127.0.0.1:3000`      |

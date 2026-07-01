@@ -51,7 +51,7 @@ it as a well-scoped markdown file. Future reviews see it through `fetchProjectCo
 
 ### Admin endpoint
 
-Open `GET /workflows/admin` in your browser to see recent review runs: models used, token
+Open `GET /admin` in your browser to see recent review runs: models used, token
 cost, file counts, escalation reasons. Data lives in the same SQLite database.
 
 ## Quick start (local)
@@ -87,22 +87,21 @@ startup** and refuses to boot if a required var is missing or malformed.
 | `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review           |
 | `MIMIR_HANDLE`              |          | `mimir`                                    | GitHub handle for `@handle remember` / `@handle review` commands          |
 | `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or a bare path)                              |
-| `INTERNAL_BASE_URL`         |          | request origin                             | loopback used to admit review runs behind a proxy                         |
 
 ## Project layout
 
 ```
 src/
-  channels/github.ts          verified webhook ingress; dedup + admit runs
+  app.ts                      Hono entrypoint: GET /admin dashboard + mounts flue()
+  channels/github.ts          verified webhook ingress; dedup + invoke() runs
   workflows/review-pr.ts      primary → escalate → post
   workflows/remember-pr.ts    /remember command → curator → commit memory
   workflows/feedback-pr.ts    auto-detect maintainer feedback → curator → commit
-  workflows/admin.ts          GET /workflows/admin — review run history
   skills/                     review-rubric, security-check, memory-curator
-  lib/                        diff, dedup, escalation, env, github, ignore,
-                              instruction, log, memory, post-review,
-                              project-context, repo-tools, retry, review,
-                              security-paths
+  lib/                        admin-html, diff, dedup, escalation, env, github,
+                              handle-delivery, ignore, instruction, log, memory,
+                              post-review, project-context, repo-tools, retry,
+                              review, security-paths
 ```
 
 Workflows and channels are discovered by flat filename in their dirs; everything else is `lib/`.

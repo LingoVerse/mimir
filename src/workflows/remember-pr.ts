@@ -1,9 +1,4 @@
-import {
-  type ActionContext,
-  type WorkflowRouteHandler,
-  defineAgent,
-  defineWorkflow,
-} from "@flue/runtime";
+import { type ActionContext, defineAgent, defineWorkflow } from "@flue/runtime";
 import * as v from "valibot";
 import { client } from "../lib/github.ts";
 import { logEvent } from "../lib/log.ts";
@@ -70,10 +65,7 @@ Apply the memory-curator skill. Return JSON only.`;
   };
 }
 
-// Expose POST /workflows/remember-pr — the admission boundary the channel calls
-// to start a durable run.
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
+// No `route` export: admitted only via ambient `invoke()` from the channel.
 export default defineWorkflow({
   agent: curatorAgent,
   input: RememberPayloadSchema,
