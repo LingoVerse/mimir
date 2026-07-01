@@ -1,0 +1,27 @@
+# Local Cloudflare dev vars. Copy to `.dev.vars` for `flue dev --target cloudflare`.
+# For a DEPLOYED Worker use `wrangler secret put <NAME>` instead — never ship real
+# secrets in a file. See DEPLOY.md.
+#
+# Storage on Cloudflare is the D1 binding `DB` (wrangler.jsonc), NOT DATABASE_URL.
+# DATABASE_URL is only used by the Node/Docker deploy (see .env.example).
+
+# --- LLM (via OpenRouter) ---
+OPENROUTER_API_KEY=""                                      # REQUIRED — https://openrouter.ai/keys
+OPENROUTER_REFERER="https://github.com"
+MODEL_PRIMARY="openrouter/google/gemini-3-flash-preview"
+MODEL_ESCALATION="openrouter/z-ai/glm-5.2"
+ESCALATION_DIFF_THRESHOLD="400"
+ESCALATE_SECURITY_ALWAYS="true"
+
+# --- GitHub ---
+GITHUB_WEBHOOK_SECRET=""                                   # REQUIRED — openssl rand -hex 32
+GITHUB_TOKEN=""                                            # REQUIRED — read diff + post comments
+MIMIR_HANDLE="mimir"
+
+# --- Behavior ---
+POST_NITS="false"
+DIFF_MAX_TOKENS="60000"
+SKIP_LABELS="mimir:skip"
+
+# --- Admin (optional) ---
+# ADMIN_TOKEN=""                                           # if set, GET /admin requires `Authorization: Bearer <token>`

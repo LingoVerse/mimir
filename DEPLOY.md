@@ -85,30 +85,65 @@ The image is Node-based, runs non-root, listens on `:3000` (binds `0.0.0.0`), ha
 4. Storage: mount a volume at **`/data`**.
 5. Domain: assign one with HTTPS — that host is your webhook **Payload URL** base.
 
-### Cloudflare Workers (experimental)
+### Cloudflare Workers (alternative)
 
-Mimir is built on [Flue](https://flueframework.com) by the Astro team, which supports
-Cloudflare Workers as a deployment target. Each agent becomes a Durable Object with
-automatic scaling.
+Mimir also builds for **Cloudflare Workers** via [Flue](https://flueframework.com): each
+workflow becomes a Durable Object, and application storage (dedup, comment-id tracking,
+review stats) moves from `node:sqlite` to **Cloudflare D1**. The storage backend is chosen
+automatically at build time — no code changes. The Docker / Node deploy above remains the
+recommended path; this is a fully-supported alternative.
 
 **Prerequisites:**
 
-- A Cloudflare account with Workers Paid plan (Durable Objects required)
-- `wrangler` CLI installed (`npm install -g wrangler`)
+- A Cloudflare account with the **Workers Paid plan** (Durable Objects require it).
+- `wrangler` is a dev dependency, so `bunx wrangler …` / `npx wrangler …` work without a
+  global install.
 
-**Build & deploy:**
+**1. Create the D1 database** and paste the returned `database_id` into
+[`wrangler.jsonc`](wrangler.jsonc) (`d1_databases[0].database_id`):
 
 ```bash
-flue build --target cloudflare
-npx wrangler deploy --secrets-file .env
+bunx wrangler d1 create mimir
 ```
 
-**⚠️ Known limitation:** Mimir currently uses `node:sqlite` (Node built-in) for delivery
-dedup, comment-ID tracking, and review stats. Cloudflare Workers does not support
-`node:sqlite` — these features require adapting to **Cloudflare D1** or another KV store
-before this deploy path is fully functional. PRs welcome.
+**2. Apply the schema** (creates the tables in `migrations/`):
 
-The Docker / Node deploy is the current recommended production path.
+```bash
+bun run d1:migrate            # remote (production D1)
+# bun run d1:migrate:local    # local dev D1 for `flue dev --target cloudflare`
+```
+
+**3. Set secrets** (do NOT rely on `.env`/`.dev.vars` for production):
+
+```bash
+bunx wrangler secret put OPENROUTER_API_KEY
+bunx wrangler secret put GITHUB_WEBHOOK_SECRET
+bunx wrangler secret put GITHUB_TOKEN
+# optional: MODEL_PRIMARY, MODEL_ESCALATION, POST_NITS, ADMIN_TOKEN, …
+```
+
+For local Cloudflare dev, put the same vars in `.dev.vars` (see
+[`.dev.vars.example`](.dev.vars.example)) and run `bun run dev:cf`.
+
+**4. Build & deploy:**
+
+```bash
+bun run build:cf
+bun run cf:dry-run            # optional: validate the generated config
+bun run deploy:cf
+```
+
+Your webhook **Payload URL** is then
+`https://mimir.<your-subdomain>.workers.dev/channels/github/webhook`.
+
+**Notes:**
+
+- **Durable Object migrations** for the generated classes live in
+  [`wrangler.jsonc`](wrangler.jsonc). Adding a workflow later means appending a new
+  migration `tag` — never rewrite a deployed entry.
+- **`DATABASE_URL` is Node/Docker-only.** On Cloudflare, storage is the D1 binding `DB`.
+- **`/admin` is public** on a Workers URL. Set `ADMIN_TOKEN` to require
+  `Authorization: Bearer <token>` (or put Cloudflare Access in front of it).
 
 ## 5. Verify it works
 
