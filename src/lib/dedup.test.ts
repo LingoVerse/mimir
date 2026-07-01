@@ -44,8 +44,22 @@ test("logReviewRun returns a run id and stores findings", () => {
     escalationReasons: "",
   };
   const findings = [
-    { file: "src/a.ts", line: 10, severity: "critical" as const, title: "Null deref", body: "user could be null", suggestion: "Add null check" },
-    { file: "src/b.ts", line: undefined, severity: "minor" as const, title: "Missing await", body: "Promise not awaited", suggestion: undefined },
+    {
+      file: "src/a.ts",
+      line: 10,
+      severity: "critical" as const,
+      title: "Null deref",
+      body: "user could be null",
+      suggestion: "Add null check",
+    },
+    {
+      file: "src/b.ts",
+      line: undefined,
+      severity: "minor" as const,
+      title: "Missing await",
+      body: "Promise not awaited",
+      suggestion: undefined,
+    },
   ];
   const runId = store.logReviewRun(base, findings);
   assert.ok(typeof runId === "number" && runId > 0);

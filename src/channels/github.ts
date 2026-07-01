@@ -230,7 +230,14 @@ export const channel = createGitHubChannel({
           return;
         }
         const source = `pr#${prNumber} by ${comment.user?.login ?? "unknown"}`;
-        await admitRemember(c.req.url, { owner, repo, prNumber, headRef: pr.head.ref, fact, source });
+        await admitRemember(c.req.url, {
+          owner,
+          repo,
+          prNumber,
+          headRef: pr.head.ref,
+          fact,
+          source,
+        });
         return;
       }
 

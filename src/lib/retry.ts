@@ -29,7 +29,10 @@ export async function withRetry<T>(
       if (attempt >= maxRetries || !isRetryable(err)) throw err;
       const jitter = Math.random() * 200;
       const delay = Math.min(baseDelay * Math.pow(2, attempt) + jitter, 15_000);
-      console.warn(`[mimir] retry ${attempt + 1}/${maxRetries} after ${delay.toFixed(0)}ms`, String(err).slice(0, 200));
+      console.warn(
+        `[mimir] retry ${attempt + 1}/${maxRetries} after ${delay.toFixed(0)}ms`,
+        String(err).slice(0, 200),
+      );
       await new Promise((r) => setTimeout(r, delay));
     }
   }

@@ -1,9 +1,14 @@
-import { type FlueContext, type WorkflowRouteHandler, createAgent } from "@flue/runtime";
+import {
+  type ActionContext,
+  type WorkflowRouteHandler,
+  defineAgent,
+  defineWorkflow,
+} from "@flue/runtime";
 import { fetchPrDiff } from "../lib/diff.ts";
 import { decideEscalation } from "../lib/escalation.ts";
 import { client } from "../lib/github.ts";
 import { fetchIgnoreMatcher } from "../lib/ignore.ts";
-import { type ReviewPayload, buildInstruction } from "../lib/instruction.ts";
+import { ReviewPayloadSchema, buildInstruction } from "../lib/instruction.ts";
 import { getReviewRunStore } from "../lib/dedup.ts";
 import { logEvent } from "../lib/log.ts";
 import { postReview } from "../lib/post-review.ts";
@@ -26,12 +31,12 @@ const ESCALATION_MODEL = process.env.MODEL_ESCALATION ?? "openrouter/z-ai/glm-5.
 
 // Primary reviewer. Both skills are registered; the security one is applied only
 // when the diff touches a sensitive surface.
-const reviewer = createAgent(() => ({
+const reviewer = defineAgent(() => ({
   model: PRIMARY_MODEL,
   skills: [reviewRubric, securityCheck],
 }));
 
-export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
+async function run({ harness, log, input: payload }: ActionContext<typeof ReviewPayloadSchema>) {
   // 1. Fetch the diff + the project's own conventions/memory (from the base ref).
   //    `.mimirignore` (read from the trusted base ref) drops project-declared
   //    generated paths from the diff before review.
@@ -63,7 +68,6 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   const tools = repoContextTools(client, toolRef, diff.files.length);
 
   // 2. Primary pass on MODEL_PRIMARY.
-  const harness = await init(reviewer);
   const session = await harness.session();
   const primaryResult = await withRetry(() =>
     session.prompt(instruction, { result: ReviewResultSchema, tools }),
@@ -93,7 +97,10 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   let escalationResult: typeof primaryResult | null = null;
   if (decision.escalate) {
     const escalationInstruction = buildInstruction(
-      payload, diff, securitySensitive, projectContext,
+      payload,
+      diff,
+      securitySensitive,
+      projectContext,
       {
         projectTree,
         scopeFiles: decision.scopeFiles,
@@ -161,7 +168,9 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
       ? escalationResult!.usage.cost.total
       : primaryResult.usage.cost.total;
     const discardModel = decision.escalate ? primaryResult.model.id : null;
-    const discardTokens = decision.escalate ? primaryResult.usage.input + primaryResult.usage.output : null;
+    const discardTokens = decision.escalate
+      ? primaryResult.usage.input + primaryResult.usage.output
+      : null;
     const discardCostUsd = decision.escalate ? primaryResult.usage.cost.total : null;
 
     getReviewRunStore().logReviewRun(
@@ -182,7 +191,9 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
       },
       review.findings,
     );
-  } catch (err) { logEvent(log, "logReviewRun failed", { error: String(err) }); }
+  } catch (err) {
+    logEvent(log, "logReviewRun failed", { error: String(err) });
+  }
 
   return {
     pr: payload,
@@ -202,3 +213,9 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
 // Expose POST /workflows/review-pr — the admission boundary the channel calls
 // to start a durable run (returns 202 { runId, ... }).
 export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export default defineWorkflow({
+  agent: reviewer,
+  input: ReviewPayloadSchema,
+  run,
+});

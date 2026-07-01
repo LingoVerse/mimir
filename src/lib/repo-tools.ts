@@ -1,4 +1,4 @@
-import { defineTool } from "@flue/runtime";
+import { type ToolDefinition, defineTool } from "@flue/runtime";
 import type { Octokit } from "@octokit/rest";
 import * as v from "valibot";
 
@@ -40,7 +40,11 @@ function errMessage(err: unknown): string {
 // diff doesn't show (callers, schemas, related modules). The scope is fixed by
 // the closure — tool parameters only choose paths/queries, never the repo/ref
 // (parameters are not an authorization boundary).
-export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef, fileCount = 0) {
+export function repoContextTools(
+  client: Octokit,
+  { owner, repo, ref }: RepoRef,
+  fileCount = 0,
+): ToolDefinition[] {
   const budget = resolveToolBudget(fileCount);
   let callCount = 0;
   // Cached tree entries for search_repo (fetched once from the head ref).
@@ -71,10 +75,10 @@ export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef,
     name: "read_repo_file",
     description:
       "Read a file from the repository at the PR head to get context the diff omits (a caller, a schema, a related module). Returns the file text.",
-    parameters: v.object({
+    input: v.object({
       path: v.pipe(v.string(), v.description('Repo-relative path, e.g. "src/auth/login.ts"')),
     }),
-    execute: async ({ path }) => {
+    run: async ({ input: { path } }) => {
       if (!isSafeRepoPath(path)) return `Invalid path: ${path}`;
       return guardedExecute("read_repo_file", path, async () => {
         try {
@@ -96,12 +100,12 @@ export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef,
   const listRepoDir = defineTool({
     name: "list_repo_dir",
     description: "List the entries of a directory in the repository at the PR head.",
-    parameters: v.object({
+    input: v.object({
       path: v.optional(
         v.pipe(v.string(), v.description('Repo-relative directory, "" for the root')),
       ),
     }),
-    execute: async ({ path }) => {
+    run: async ({ input: { path } }) => {
       const dir = path ?? "";
       if (!isSafeRepoPath(dir)) return `Invalid path: ${dir}`;
       return guardedExecute("list_repo_dir", dir, async () => {
@@ -120,19 +124,20 @@ export function repoContextTools(client: Octokit, { owner, repo, ref }: RepoRef,
     name: "search_repo",
     description:
       "Search this repository (PR head ref) by file path for a symbol or string. Returns matching file paths to read — use to locate definitions/usages related to the diff. Searches the PR head so new code is visible.",
-    parameters: v.object({
+    input: v.object({
       query: v.pipe(v.string(), v.description("Search terms, e.g. a function or class name")),
     }),
-    execute: async ({ query }) => {
+    run: async ({ input: { query } }) => {
       return guardedExecute("search_repo", query, async () => {
         try {
           if (repoTree === null) {
             const { data } = await client.rest.git.getTree({
-              owner, repo, tree_sha: ref, recursive: "1",
+              owner,
+              repo,
+              tree_sha: ref,
+              recursive: "1",
             });
-            repoTree = data.tree
-              .filter((e) => e.path && e.type === "blob")
-              .map((e) => e.path!);
+            repoTree = data.tree.filter((e) => e.path && e.type === "blob").map((e) => e.path!);
           }
           const q = query.toLowerCase();
           const matches = repoTree.filter((p) => p.toLowerCase().includes(q));

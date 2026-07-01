@@ -118,11 +118,11 @@ function inlineCommentBody(f: Finding): string {
   return parts.join("\n");
 }
 
-export interface PostResult {
+export type PostResult = {
   summaryCommentId: number;
   summaryUpdated: boolean;
   inlinePosted: number;
-}
+};
 
 // Post the review: one summary comment (created once, updated on re-review) plus
 // inline comments for findings that carry a line. Keeps the issue-comment and

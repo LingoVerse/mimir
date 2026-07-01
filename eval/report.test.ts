@@ -35,8 +35,20 @@ test("renderReport: single result", async () => {
 test("renderReport: multiple results with averages", async () => {
   const { renderReport } = await import("./report.ts");
   const results = [
-    makeResult({ fixtureId: "001", fixtureName: "Null", precision: 1, recall: 0.5, avgRelevance: 4 }),
-    makeResult({ fixtureId: "002", fixtureName: "Missing await", precision: 0.75, recall: 1, avgRelevance: 3 }),
+    makeResult({
+      fixtureId: "001",
+      fixtureName: "Null",
+      precision: 1,
+      recall: 0.5,
+      avgRelevance: 4,
+    }),
+    makeResult({
+      fixtureId: "002",
+      fixtureName: "Missing await",
+      precision: 0.75,
+      recall: 1,
+      avgRelevance: 3,
+    }),
   ];
   const output = renderReport(results);
   assert.ok(output.includes("001 Null"));

@@ -1,16 +1,18 @@
+import * as v from "valibot";
 import type { PrDiff } from "./diff.ts";
 import type { Finding } from "./review.ts";
 
 // PR coordinates passed by the GitHub channel when it admits a review run
 // (resolved from the webhook payload, not re-fetched).
-export interface ReviewPayload {
-  owner: string;
-  repo: string;
-  number: number;
-  headSha: string;
+export const ReviewPayloadSchema = v.object({
+  owner: v.string(),
+  repo: v.string(),
+  number: v.number(),
+  headSha: v.string(),
   // Base branch — project context (conventions/memory) is read from here (trusted).
-  baseRef: string;
-}
+  baseRef: v.string(),
+});
+export type ReviewPayload = v.InferOutput<typeof ReviewPayloadSchema>;
 
 // Render the chunked diff as a single text block for the model.
 function renderDiff(diff: PrDiff): string {
@@ -59,9 +61,7 @@ export function buildInstruction(
     projectContext
       ? `\n## Project context — the project's own conventions/memory; honour these\n${projectContext}`
       : null,
-    projectTree
-      ? `\n## Project tree — directory structure of the head ref\n${projectTree}`
-      : null,
+    projectTree ? `\n## Project tree — directory structure of the head ref\n${projectTree}` : null,
     scopeFiles && scopeFiles.length > 0
       ? `\n## Focus — escalation was triggered for these files; prioritise them\n${scopeFiles.map((f) => `- ${f}`).join("\n")}`
       : null,

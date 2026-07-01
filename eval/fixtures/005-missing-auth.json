@@ -14,7 +14,14 @@
   "securitySensitive": true,
   "expectedFindings": [
     {
-      "mustMatchKeywords": ["auth", "authentication", "middleware", "requireAuth", "unauthenticated", "protected"],
+      "mustMatchKeywords": [
+        "auth",
+        "authentication",
+        "middleware",
+        "requireAuth",
+        "unauthenticated",
+        "protected"
+      ],
       "severity": "critical",
       "description": "DELETE /api/admin/users/:id performs permanent deletion with no authentication — any unauthenticated request can delete users"
     },

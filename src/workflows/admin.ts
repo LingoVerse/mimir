@@ -33,7 +33,9 @@ export const route: WorkflowRouteHandler = async (c, next) => {
 <th>PR</th><th>Primary</th><th>Escalation</th><th>Files</th><th>Lines</th><th>Cost</th><th>Esc</th><th>Reasons</th><th>Time</th>
 </tr></thead>
 <tbody>
-${runs.map((r) => `<tr>
+${runs
+  .map(
+    (r) => `<tr>
   <td>${r.prKey}</td>
   <td>${r.primaryModel.split("/").pop()}</td>
   <td>${r.escalationModel?.split("/").pop() ?? "—"}</td>
@@ -43,7 +45,9 @@ ${runs.map((r) => `<tr>
   <td><span class="badge ${r.escalated ? "badge-yes" : "badge-no"}">${r.escalated ? "yes" : "no"}</span></td>
   <td>${r.escalationReasons || "—"}</td>
   <td>${new Date(r.createdAt).toLocaleString()}</td>
-</tr>`).join("\n")}
+</tr>`,
+  )
+  .join("\n")}
 </tbody></table>
 </body></html>`;
 

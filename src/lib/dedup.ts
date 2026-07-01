@@ -190,14 +190,18 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
       if (findings?.length) {
         const now = Date.now();
         // Multi-row INSERT: build VALUES placeholders once, flatten params.
-        const placeholders = findings
-          .map(() => "(?, ?, ?, ?, ?, ?, ?, ?)")
-          .join(", ");
+        const placeholders = findings.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
         const params: (null | number | bigint | string)[] = [];
         for (const f of findings) {
           params.push(
-            runId, f.file, f.line ?? null, f.severity,
-            f.title, f.body, f.suggestion ?? null, now,
+            runId,
+            f.file,
+            f.line ?? null,
+            f.severity,
+            f.title,
+            f.body,
+            f.suggestion ?? null,
+            now,
           );
         }
         this.#db
@@ -267,7 +271,8 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
           primaryCostUsd: Number(row.primary_cost_usd),
           escalationModel: row.escalation_model as string | null,
           escalationTokens: row.escalation_tokens != null ? Number(row.escalation_tokens) : null,
-          escalationCostUsd: row.escalation_cost_usd != null ? Number(row.escalation_cost_usd) : null,
+          escalationCostUsd:
+            row.escalation_cost_usd != null ? Number(row.escalation_cost_usd) : null,
           fileCount: Number(row.file_count),
           changedLines: Number(row.changed_lines),
           truncated: Number(row.truncated),

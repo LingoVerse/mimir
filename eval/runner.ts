@@ -22,7 +22,11 @@ function stripModelPrefix(model: string): string {
   return model.replace(/^openrouter\//, "");
 }
 
-function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 120_000): Promise<Response> {
+function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = 120_000,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
@@ -102,7 +106,9 @@ export async function runFixture(
     const flat = v.flatten(result.issues);
     const errors = [
       ...(flat.root ?? []),
-      ...Object.entries(flat.nested ?? {}).map(([path, msgs]) => `${path}: ${(msgs ?? []).join(", ")}`),
+      ...Object.entries(flat.nested ?? {}).map(
+        ([path, msgs]) => `${path}: ${(msgs ?? []).join(", ")}`,
+      ),
     ].join("; ");
     throw new Error(`Model output failed schema validation for fixture ${fixture.id}: ${errors}`);
   }
@@ -116,10 +122,7 @@ export async function runFixture(
 // CAVEAT: Keyword matching is an UPPER BOUND on true semantic recall. The model
 // may mention a keyword while actually dismissing the issue (e.g. "not a null
 // problem" still matches "null"). Use LLM judge scores for a tighter estimate.
-export function computeRecall(
-  fixture: EvalFixture,
-  review: ReviewResult,
-): number {
+export function computeRecall(fixture: EvalFixture, review: ReviewResult): number {
   if (fixture.expectedFindings.length === 0) return 1;
   let caught = 0;
   for (const expected of fixture.expectedFindings) {
