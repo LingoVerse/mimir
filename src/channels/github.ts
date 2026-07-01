@@ -72,7 +72,12 @@ export const channel = createGitHubChannel({
   // Mounted at POST /channels/github/webhook. GitHub expects a 2xx within ~10s
   // and does not auto-retry, so verify, admit durable work, and return fast —
   // never block the response on diff fetching or LLM calls.
-  async webhook({ delivery }) {
+  async webhook({ c, delivery }) {
+    // On Cloudflare the channel runs in the main worker (outside Flue's context),
+    // so the D1 binding comes from Hono's c.env; on Node c.env has no DB and the
+    // store falls back to node:sqlite.
+    const dedup = getDedupStore((c.env as { DB?: unknown } | undefined)?.DB);
+
     if (delivery.name === "pull_request" && REVIEW_ACTIONS.has(delivery.payload.action)) {
       // Opt-out lever: a skip label on the PR excludes it from review entirely
       // (persists across every push, unlike the per-commit marker). Checked from
@@ -107,9 +112,8 @@ export const channel = createGitHubChannel({
         headSha: pull_request.head.sha,
         baseRef: pull_request.base.ref,
       };
-      const store = getDedupStore();
       await handlePullRequestDelivery(
-        { claim: store.claim.bind(store), release: store.release.bind(store), admit: admitReview },
+        { claim: dedup.claim.bind(dedup), release: dedup.release.bind(dedup), admit: admitReview },
         delivery.deliveryId,
         pr,
       );
@@ -126,7 +130,7 @@ export const channel = createGitHubChannel({
 
       // /review — maintainer re-triggers a (read-only) review.
       if (parseReviewCommand(comment.body)) {
-        if (!(await getDedupStore().claim(delivery.deliveryId))) {
+        if (!(await dedup.claim(delivery.deliveryId))) {
           console.log("[mimir] duplicate /review delivery skipped", delivery.deliveryId);
           return;
         }
@@ -145,7 +149,7 @@ export const channel = createGitHubChannel({
       // /remember or /feedback — maintainer commits project memory.
       const fact = parseRememberCommand(comment.body);
       if (fact) {
-        if (!(await getDedupStore().claim(delivery.deliveryId))) {
+        if (!(await dedup.claim(delivery.deliveryId))) {
           console.log("[mimir] duplicate remember delivery skipped", delivery.deliveryId);
           return;
         }
@@ -176,7 +180,7 @@ export const channel = createGitHubChannel({
       if (isLikelyFeedback(comment.body)) {
         const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
         if (pr.head.repo?.full_name !== `${owner}/${repo}`) return; // fork — can't push memory
-        if (!(await getDedupStore().claim(delivery.deliveryId))) {
+        if (!(await dedup.claim(delivery.deliveryId))) {
           console.log("[mimir] duplicate feedback delivery skipped", delivery.deliveryId);
           return;
         }

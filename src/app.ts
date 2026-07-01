@@ -19,7 +19,10 @@ app.get("/admin", async (c) => {
   if (token && c.req.header("authorization") !== `Bearer ${token}`) {
     return c.text("Unauthorized", 401);
   }
-  const store = getReviewRunStore();
+  // On Cloudflare this route runs in the main worker (outside Flue's context), so
+  // the D1 binding comes from Hono's c.env, not getCloudflareContext(). On Node
+  // c.env has no DB and the store falls back to node:sqlite.
+  const store = getReviewRunStore((c.env as { DB?: unknown } | undefined)?.DB);
   const stats = await store.getStats();
   const runs = await store.getRecentRuns(20);
   return c.html(renderAdminHtml(stats, runs));
