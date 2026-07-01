@@ -301,6 +301,9 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
 }
 
 // Backend factory. The facade (dedup.ts) selects this on Node via "#app-store".
-export function createStore(): Store {
+// The optional binding arg mirrors the D1 factory's signature (so callers can
+// pass a Cloudflare binding uniformly) and is ignored here — Node reads the path
+// from DATABASE_URL.
+export function createStore(_binding?: unknown): Store {
   return new SqliteDedupStore();
 }
