@@ -5,7 +5,7 @@ reviews. This covers the GitHub setup — the part that's easy to get wrong — 
 
 ## 1. Prerequisites
 
-- A Docker host reachable over **HTTPS** (Hetzner + Dokploy, Fly, Railway, or any VM with a
+- A Docker host reachable over **HTTPS** (Dokploy, Fly, Railway, or any VM with a
   reverse proxy + TLS).
 - An **OpenRouter** API key — <https://openrouter.ai/keys>.
 - Admin on the GitHub repo or org you want reviewed.
@@ -78,7 +78,7 @@ docker compose up -d --build
 The image is Node-based, runs non-root, listens on `:3000` (binds `0.0.0.0`), has a
 `HEALTHCHECK`, and keeps SQLite on the `mimir-data` volume.
 
-### Dokploy (Hetzner)
+### Dokploy
 
 1. New app → from this repo (or push the prebuilt image).
 2. Build: **Dockerfile** (default).
