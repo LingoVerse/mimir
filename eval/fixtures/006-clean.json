@@ -1,0 +1,16 @@
+{
+  "id": "006",
+  "name": "Clean diff — no issues expected",
+  "files": [
+    {
+      "filename": "src/services/user.ts",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 4,
+      "patch": "@@ -5,12 +5,12 @@ import { db } from \"./database.ts\";\n \n export async function getUser(id: string): Promise<User | null> {\n-  const user = db.users.findFirst({\n+  const user = await db.users.findFirst({\n     where: { id },\n   });\n-  if (user === null) return null;\n+  if (!user) return null;\n   return {\n-    name: user.name,\n+    fullName: user.name,\n     email: user.email,\n   };\n }"
+    }
+  ],
+  "changedLines": 8,
+  "securitySensitive": false,
+  "expectedFindings": []
+}

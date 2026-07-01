@@ -21,7 +21,7 @@ export function renderReport(results: EvalResult[]): string {
   ];
 
   const rows = results.map((r) => {
-    const modelShort = r.model.replace(/^openrouter\//, "").replace(/^.*\//, "");
+    const modelShort = r.model.replace(/^openrouter\//, "").replace(/^[^/]+\//, "");
     return `| ${r.fixtureId} ${r.fixtureName.slice(0, 30)} | ${modelShort} | ${pct(r.precision)} | ${pct(r.recall)} | ${fmt(r.avgRelevance, 1)} | ${r.findingCount} | ${r.escalated ? "yes" : "no"} | ${r.durationMs} |`;
   });
 

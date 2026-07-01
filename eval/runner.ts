@@ -112,6 +112,10 @@ export async function runFixture(
 // Compute recall: fraction of expected findings that were caught by the model.
 // A finding is "caught" if any generated finding contains a keyword match in its
 // title or body. No file-level filtering — matches across all generated findings.
+//
+// CAVEAT: Keyword matching is an UPPER BOUND on true semantic recall. The model
+// may mention a keyword while actually dismissing the issue (e.g. "not a null
+// problem" still matches "null"). Use LLM judge scores for a tighter estimate.
 export function computeRecall(
   fixture: EvalFixture,
   review: ReviewResult,

@@ -188,14 +188,24 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
         );
       const runId = Number(result.lastInsertRowid);
       if (findings?.length) {
-        const insertFinding = this.#db.prepare(
-          `INSERT INTO review_findings (run_id, file, line, severity, title, body, suggestion, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        );
         const now = Date.now();
+        // Multi-row INSERT: build VALUES placeholders once, flatten params.
+        const placeholders = findings
+          .map(() => "(?, ?, ?, ?, ?, ?, ?, ?)")
+          .join(", ");
+        const params: (null | number | bigint | string)[] = [];
         for (const f of findings) {
-          insertFinding.run(runId, f.file, f.line ?? null, f.severity, f.title, f.body, f.suggestion ?? null, now);
+          params.push(
+            runId, f.file, f.line ?? null, f.severity,
+            f.title, f.body, f.suggestion ?? null, now,
+          );
         }
+        this.#db
+          .prepare(
+            `INSERT INTO review_findings (run_id, file, line, severity, title, body, suggestion, created_at)
+             VALUES ${placeholders}`,
+          )
+          .run(...params);
       }
       this.#db.exec("COMMIT");
       return runId;
@@ -226,8 +236,64 @@ export class SqliteDedupStore implements DedupStore, SummaryCommentStore, Review
   }
 
   exportRunsWithFindings(limit = 100): RunWithFindings[] {
-    const runs = this.getRecentRuns(limit);
-    return runs.map((run) => ({ ...run, findings: this.getRunFindings(run.id) }));
+    const rows = this.#db
+      .prepare(
+        `SELECT
+          r.id, r.pr_key, r.primary_model, r.primary_tokens, r.primary_cost_usd,
+          r.escalation_model, r.escalation_tokens, r.escalation_cost_usd,
+          r.file_count, r.changed_lines, r.truncated, r.security_sensitive,
+          r.escalated, r.escalation_reasons, r.created_at,
+          rf.id as finding_id, rf.run_id, rf.file as finding_file, rf.line as finding_line,
+          rf.severity as finding_severity, rf.title as finding_title,
+          rf.body as finding_body, rf.suggestion as finding_suggestion,
+          rf.created_at as finding_created_at
+         FROM review_runs r
+         LEFT JOIN review_findings rf ON rf.run_id = r.id
+         ORDER BY r.created_at DESC, rf.id
+         LIMIT ?`,
+      )
+      .all(limit) as Record<string, unknown>[];
+    // Group by run_id in a single pass.
+    const runMap = new Map<number, RunWithFindings>();
+    for (const row of rows) {
+      const runId = Number(row.id);
+      let entry = runMap.get(runId);
+      if (!entry) {
+        entry = {
+          id: runId,
+          prKey: String(row.pr_key),
+          primaryModel: String(row.primary_model),
+          primaryTokens: Number(row.primary_tokens),
+          primaryCostUsd: Number(row.primary_cost_usd),
+          escalationModel: row.escalation_model as string | null,
+          escalationTokens: row.escalation_tokens != null ? Number(row.escalation_tokens) : null,
+          escalationCostUsd: row.escalation_cost_usd != null ? Number(row.escalation_cost_usd) : null,
+          fileCount: Number(row.file_count),
+          changedLines: Number(row.changed_lines),
+          truncated: Number(row.truncated),
+          securitySensitive: Number(row.security_sensitive),
+          escalated: Number(row.escalated),
+          escalationReasons: String(row.escalation_reasons),
+          createdAt: Number(row.created_at),
+          findings: [],
+        };
+        runMap.set(runId, entry);
+      }
+      if (row.finding_id != null) {
+        entry.findings.push({
+          id: Number(row.finding_id),
+          runId: Number(row.run_id),
+          file: String(row.finding_file),
+          line: row.finding_line != null ? Number(row.finding_line) : null,
+          severity: String(row.finding_severity),
+          title: String(row.finding_title),
+          body: String(row.finding_body),
+          suggestion: row.finding_suggestion != null ? String(row.finding_suggestion) : null,
+          createdAt: Number(row.finding_created_at),
+        });
+      }
+    }
+    return [...runMap.values()];
   }
 
   getRecentRuns(limit = 20): ReviewRunRecord[] {

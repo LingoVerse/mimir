@@ -108,11 +108,12 @@ export async function judgeFindings(
     .filter((item) => item.findingIndex >= 0);
 }
 
-// Precision: judge-approved findings (score >= 3) divided by TOTAL findings
-// generated — not just those the judge returned scores for. LLMs sometimes omit
-// items silently; using the actual finding count prevents that from inflating precision.
+// Precision: judge-approved findings (score >= 3) divided by findings the judge
+// actually scored. An unscored finding is neither approved nor rejected — we
+// report scoredCount / totalFindings separately so callers can assess coverage.
 export function computePrecision(scores: JudgeScore[], totalFindings: number): number {
-  if (totalFindings === 0) return 1; // no findings = no false positives
+  if (totalFindings === 0) return 1;
+  if (scores.length === 0) return NaN;
   const approved = scores.filter((s) => s.score >= 3).length;
-  return approved / totalFindings;
+  return approved / scores.length;
 }

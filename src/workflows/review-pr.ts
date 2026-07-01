@@ -149,16 +149,30 @@ export async function run({ init, log, payload }: FlueContext<ReviewPayload>) {
   });
 
   // Store review run stats for the admin endpoint.
+  // When escalated, `review` comes from the escalation model; log that model as
+  // primary so the recorded tokens/cost match the origin of the stored findings.
+  // The `escalated` flag still records that secondary review happened.
   try {
+    const finalModel = decision.escalate ? escalationResult!.model.id : primaryResult.model.id;
+    const finalTokens = decision.escalate
+      ? escalationResult!.usage.input + escalationResult!.usage.output
+      : primaryResult.usage.input + primaryResult.usage.output;
+    const finalCostUsd = decision.escalate
+      ? escalationResult!.usage.cost.total
+      : primaryResult.usage.cost.total;
+    const discardModel = decision.escalate ? primaryResult.model.id : null;
+    const discardTokens = decision.escalate ? primaryResult.usage.input + primaryResult.usage.output : null;
+    const discardCostUsd = decision.escalate ? primaryResult.usage.cost.total : null;
+
     getReviewRunStore().logReviewRun(
       {
         prKey: `${payload.owner}/${payload.repo}#${payload.number}`,
-        primaryModel: primaryResult.model.id,
-        primaryTokens: primaryResult.usage.input + primaryResult.usage.output,
-        primaryCostUsd: primaryResult.usage.cost.total,
-        escalationModel: escalationResult?.model.id ?? null,
-        escalationTokens: escalationResult ? escalationResult.usage.input + escalationResult.usage.output : null,
-        escalationCostUsd: escalationResult?.usage.cost.total ?? null,
+        primaryModel: finalModel,
+        primaryTokens: finalTokens,
+        primaryCostUsd: finalCostUsd,
+        escalationModel: discardModel,
+        escalationTokens: discardTokens,
+        escalationCostUsd: discardCostUsd,
         fileCount: diff.files.length,
         changedLines: diff.totalChangedLines,
         truncated: diff.truncated?.omitted.length ?? 0,

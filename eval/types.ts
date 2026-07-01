@@ -1,28 +1,34 @@
 // Types shared between the eval runner, judge, and report formatter.
 
-export interface FixtureFile {
-  filename: string;
-  status: string;
-  additions: number;
-  deletions: number;
-  patch: string;
-}
+import * as v from "valibot";
 
-export interface ExpectedFinding {
+const FixtureFileSchema = v.object({
+  filename: v.string(),
+  status: v.string(),
+  additions: v.number(),
+  deletions: v.number(),
+  patch: v.string(),
+});
+
+const ExpectedFindingSchema = v.object({
   // At least one keyword must appear (case-insensitive) in the finding's title or body.
-  mustMatchKeywords: string[];
-  severity: "critical" | "major" | "minor" | "nit";
-  description: string;
-}
+  mustMatchKeywords: v.array(v.string()),
+  severity: v.picklist(["critical", "major", "minor", "nit"]),
+  description: v.string(),
+});
 
-export interface EvalFixture {
-  id: string;
-  name: string;
-  files: FixtureFile[];
-  changedLines: number;
-  securitySensitive: boolean;
-  expectedFindings: ExpectedFinding[];
-}
+export const EvalFixtureSchema = v.object({
+  id: v.string(),
+  name: v.string(),
+  files: v.array(FixtureFileSchema),
+  changedLines: v.number(),
+  securitySensitive: v.boolean(),
+  expectedFindings: v.array(ExpectedFindingSchema),
+});
+
+export type FixtureFile = v.InferOutput<typeof FixtureFileSchema>;
+export type ExpectedFinding = v.InferOutput<typeof ExpectedFindingSchema>;
+export type EvalFixture = v.InferOutput<typeof EvalFixtureSchema>;
 
 export interface JudgeScore {
   findingIndex: number;
