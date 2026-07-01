@@ -1,18 +1,15 @@
-// Admin endpoint: review-run history and stats. Mounted at GET /workflows/admin
-// by Flue (auto-discovered from the `route` export). Pass-through to `next` for
-// POST (workflow admission), handle GET directly.
+import type { ReviewRunRecord } from "./dedup.ts";
 
-import { type WorkflowRouteHandler } from "@flue/runtime";
-import { getReviewRunStore } from "../lib/dedup.ts";
+export interface AdminStats {
+  totalRuns: number;
+  totalCost: number;
+  avgCost: number;
+}
 
-export const route: WorkflowRouteHandler = async (c, next) => {
-  if (c.req.method !== "GET") return next();
-
-  const store = getReviewRunStore();
-  const stats = store.getStats();
-  const runs = store.getRecentRuns(20);
-
-  const html = `<!DOCTYPE html>
+// Pure render of the admin dashboard: review-run history + aggregate stats.
+// Kept separate from the route handler (app.ts) so it is trivially unit-testable.
+export function renderAdminHtml(stats: AdminStats, runs: ReviewRunRecord[]): string {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Mimir admin</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -50,6 +47,4 @@ ${runs
   .join("\n")}
 </tbody></table>
 </body></html>`;
-
-  return c.html(html);
-};
+}

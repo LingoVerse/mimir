@@ -1,9 +1,4 @@
-import {
-  type ActionContext,
-  type WorkflowRouteHandler,
-  defineAgent,
-  defineWorkflow,
-} from "@flue/runtime";
+import { type ActionContext, defineAgent, defineWorkflow } from "@flue/runtime";
 import { fetchPrDiff } from "../lib/diff.ts";
 import { decideEscalation } from "../lib/escalation.ts";
 import { client } from "../lib/github.ts";
@@ -210,10 +205,8 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
   };
 }
 
-// Expose POST /workflows/review-pr — the admission boundary the channel calls
-// to start a durable run (returns 202 { runId, ... }).
-export const route: WorkflowRouteHandler = async (_c, next) => next();
-
+// No `route` export: the workflow is admitted only via ambient `invoke()` from
+// the GitHub channel (no public POST endpoint).
 export default defineWorkflow({
   agent: reviewer,
   input: ReviewPayloadSchema,
