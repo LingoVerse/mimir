@@ -32,8 +32,10 @@ GitHub webhook                                           (channels/github.ts)
   → log review stats to SQLite for the admin endpoint      (lib/dedup.ts)
 ```
 
-Built on **Flue** (Node runtime), **OpenRouter** (LLM gateway), **octokit** (GitHub API),
-and **SQLite** (delivery dedup + summary-comment tracking + review stats).
+Built on **Flue**, **OpenRouter** (LLM gateway), **octokit** (GitHub API), and a small
+app store for delivery dedup + summary-comment tracking + review stats — **SQLite**
+(`node:sqlite`) on the Node/Docker target, **Cloudflare D1** on the Workers target. Deploys
+to Docker/Node (recommended) or Cloudflare Workers; see **[DEPLOY.md](DEPLOY.md)**.
 
 ### Memory & feedback loop
 
@@ -52,7 +54,8 @@ it as a well-scoped markdown file. Future reviews see it through `fetchProjectCo
 ### Admin endpoint
 
 Open `GET /admin` in your browser to see recent review runs: models used, token
-cost, file counts, escalation reasons. Data lives in the same SQLite database.
+cost, file counts, escalation reasons. Data lives in the app store (SQLite on Node,
+D1 on Cloudflare). Set `ADMIN_TOKEN` to require a bearer token on this endpoint.
 
 ## Quick start (local)
 
@@ -71,22 +74,23 @@ production deploy — is in **[DEPLOY.md](DEPLOY.md)**.
 All model selection is env, so swapping models is a config change. The app **validates env at
 startup** and refuses to boot if a required var is missing or malformed.
 
-| Var                         | Required | Default                                    | Purpose                                                                   |
-| --------------------------- | :------: | ------------------------------------------ | ------------------------------------------------------------------------- |
-| `OPENROUTER_API_KEY`        |    ✅    | —                                          | LLM access (all models via OpenRouter)                                    |
-| `GITHUB_WEBHOOK_SECRET`     |    ✅    | —                                          | verify inbound webhook signatures                                         |
-| `GITHUB_TOKEN`              |    ✅    | —                                          | read the diff + post comments                                             |
-| `MODEL_PRIMARY`             |          | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR                                              |
-| `MODEL_ESCALATION`          |          | `openrouter/z-ai/glm-5.2`                  | stronger pass on hard diffs                                               |
-| `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                                      |
-| `ESCALATE_SECURITY_ALWAYS`  |          | `true`                                     | always escalate on security-sensitive paths (vs only when findings exist) |
-| `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                             |
-| `REPO_TOOL_CALL_BUDGET`     |          | auto                                       | pin per-pass repo-tool calls (else scales ~1/reviewed file)               |
-| `REPO_TOOL_CALL_BUDGET_MAX` |          | `40`                                       | cap when the tool-call budget auto-scales with PR size                    |
-| `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                                         |
-| `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review           |
-| `MIMIR_HANDLE`              |          | `mimir`                                    | GitHub handle for `@handle remember` / `@handle review` commands          |
-| `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or a bare path)                              |
+| Var                         | Required | Default                                    | Purpose                                                                                                |
+| --------------------------- | :------: | ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `OPENROUTER_API_KEY`        |    ✅    | —                                          | LLM access (all models via OpenRouter)                                                                 |
+| `GITHUB_WEBHOOK_SECRET`     |    ✅    | —                                          | verify inbound webhook signatures                                                                      |
+| `GITHUB_TOKEN`              |    ✅    | —                                          | read the diff + post comments                                                                          |
+| `MODEL_PRIMARY`             |          | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR                                                                           |
+| `MODEL_ESCALATION`          |          | `openrouter/z-ai/glm-5.2`                  | stronger pass on hard diffs                                                                            |
+| `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                                                                   |
+| `ESCALATE_SECURITY_ALWAYS`  |          | `true`                                     | always escalate on security-sensitive paths (vs only when findings exist)                              |
+| `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                                                          |
+| `REPO_TOOL_CALL_BUDGET`     |          | auto                                       | pin per-pass repo-tool calls (else scales ~1/reviewed file)                                            |
+| `REPO_TOOL_CALL_BUDGET_MAX` |          | `40`                                       | cap when the tool-call budget auto-scales with PR size                                                 |
+| `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                                                                      |
+| `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review                                        |
+| `MIMIR_HANDLE`              |          | `mimir`                                    | GitHub handle for `@handle remember` / `@handle review` commands                                       |
+| `ADMIN_TOKEN`               |          | —                                          | if set, `GET /admin` requires `Authorization: Bearer <token>` (else open)                              |
+| `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or bare path) — **Node/Docker only**; Cloudflare uses the D1 binding `DB` |
 
 ## Project layout
 
@@ -113,19 +117,26 @@ bun run dev | build | typecheck | test | lint | format
 ```
 
 Tests run under `node --test` (matching the Node runtime, where `node:sqlite` is available).
+The Cloudflare **D1** backend is tested in workerd via `bun run test:cf`
+(`@cloudflare/vitest-pool-workers`, `*.spec.ts`).
 
 ## Design notes
 
 - **Node runtime, not Bun.** Flue's CLI needs `node:module.registerHooks`, which Bun lacks;
-  Bun is only the package manager (flue runs under Node via its bin shebang). Deploy is Node.
+  Bun is only the package manager (flue runs under Node via its bin shebang).
+- **Two deploy targets, one codebase.** `flue build --target node` (Docker, recommended) and
+  `--target cloudflare` (Workers) share everything. The app store is the only
+  runtime-specific piece — `node:sqlite` on Node, Cloudflare D1 on Workers — selected by a
+  `#app-store` subpath import (`workerd` condition), so the channel, workflows, and octokit
+  paths are byte-for-byte the same on both.
 - **OpenRouter is a built-in Flue provider** — no registration code, just `OPENROUTER_API_KEY`;
   specifiers look like `openrouter/<vendor>/<model>`.
 - **Dual-model + scoped escalation.** Every PR gets the cheap pass; escalation re-reviews on the
   stronger model and replaces the result. When triggered by specific findings (critical severity,
   security-sensitive paths), only the relevant files are scoped — the model gets the full diff
   for context but a "focus" directive to concentrate its effort.
-- **Idempotency.** Webhook deliveries are claimed in SQLite (replays skipped); the summary
-  comment id is stored so a re-push updates one comment instead of stacking new ones.
+- **Idempotency.** Webhook deliveries are claimed in the app store (replays skipped); the
+  summary comment id is stored so a re-push updates one comment instead of stacking new ones.
 - **`.mimirignore`.** A repo can drop generated artefacts from review (e.g. a 3k-line Drizzle
   `migrations/meta/*_snapshot.json`) by committing a `.mimirignore` to the **base branch** —
   gitignore-style globs, one per line, `#` comments allowed. Matching files are filtered out of

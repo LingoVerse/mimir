@@ -12,10 +12,16 @@ const app = flue();
 // under workflows/ — which on Cloudflare spuriously generated a Durable Object
 // class (FlueAdminWorkflow) for what is a plain read-and-render endpoint. It is
 // an application route, not a workflow, so it lives here.
-app.get("/admin", (c) => {
+app.get("/admin", async (c) => {
+  // Optional gate: when ADMIN_TOKEN is set, require it (the Worker URL is public
+  // on Cloudflare). Unset → open, preserving the Docker/Node default.
+  const token = process.env.ADMIN_TOKEN;
+  if (token && c.req.header("authorization") !== `Bearer ${token}`) {
+    return c.text("Unauthorized", 401);
+  }
   const store = getReviewRunStore();
-  const stats = store.getStats();
-  const runs = store.getRecentRuns(20);
+  const stats = await store.getStats();
+  const runs = await store.getRecentRuns(20);
   return c.html(renderAdminHtml(stats, runs));
 });
 

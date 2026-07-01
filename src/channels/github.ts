@@ -126,7 +126,7 @@ export const channel = createGitHubChannel({
 
       // /review — maintainer re-triggers a (read-only) review.
       if (parseReviewCommand(comment.body)) {
-        if (!getDedupStore().claim(delivery.deliveryId)) {
+        if (!(await getDedupStore().claim(delivery.deliveryId))) {
           console.log("[mimir] duplicate /review delivery skipped", delivery.deliveryId);
           return;
         }
@@ -145,7 +145,7 @@ export const channel = createGitHubChannel({
       // /remember or /feedback — maintainer commits project memory.
       const fact = parseRememberCommand(comment.body);
       if (fact) {
-        if (!getDedupStore().claim(delivery.deliveryId)) {
+        if (!(await getDedupStore().claim(delivery.deliveryId))) {
           console.log("[mimir] duplicate remember delivery skipped", delivery.deliveryId);
           return;
         }
@@ -176,7 +176,7 @@ export const channel = createGitHubChannel({
       if (isLikelyFeedback(comment.body)) {
         const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
         if (pr.head.repo?.full_name !== `${owner}/${repo}`) return; // fork — can't push memory
-        if (!getDedupStore().claim(delivery.deliveryId)) {
+        if (!(await getDedupStore().claim(delivery.deliveryId))) {
           console.log("[mimir] duplicate feedback delivery skipped", delivery.deliveryId);
           return;
         }

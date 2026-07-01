@@ -14,5 +14,6 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "eval/**/*.ts", "scripts/**/*.ts", "*.config.ts"]
+  "include": ["src/**/*.ts", "eval/**/*.ts", "scripts/**/*.ts", "*.config.ts"],
+  "exclude": ["src/**/*.spec.ts"]
 }

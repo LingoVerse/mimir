@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SqliteDedupStore } from "./dedup.ts";
+import { SqliteDedupStore } from "./dedup.node.ts";
 
-test("claim is idempotent: first wins, replay is rejected", () => {
+test("claim is idempotent: first wins, replay is rejected", async () => {
   const store = new SqliteDedupStore(":memory:");
-  assert.equal(store.claim("delivery-1"), true);
-  assert.equal(store.claim("delivery-1"), false); // replay
-  assert.equal(store.claim("delivery-2"), true); // distinct id
+  assert.equal(await store.claim("delivery-1"), true);
+  assert.equal(await store.claim("delivery-1"), false); // replay
+  assert.equal(await store.claim("delivery-2"), true); // distinct id
 });
 
 test("rejects non-sqlite DATABASE_URL schemes", () => {
@@ -14,19 +14,19 @@ test("rejects non-sqlite DATABASE_URL schemes", () => {
   assert.throws(() => new SqliteDedupStore("redis://localhost:6379"), /sqlite only/);
 });
 
-test("release: claim → release → claim again returns true", () => {
+test("release: claim → release → claim again returns true", async () => {
   const store = new SqliteDedupStore(":memory:");
-  assert.equal(store.claim("delivery-r1"), true);
-  store.release("delivery-r1");
-  assert.equal(store.claim("delivery-r1"), true); // re-claimable after release
+  assert.equal(await store.claim("delivery-r1"), true);
+  await store.release("delivery-r1");
+  assert.equal(await store.claim("delivery-r1"), true); // re-claimable after release
 });
 
-test("release: no-op when id was never claimed", () => {
+test("release: no-op when id was never claimed", async () => {
   const store = new SqliteDedupStore(":memory:");
-  assert.doesNotThrow(() => store.release("never-claimed"));
+  await assert.doesNotReject(() => store.release("never-claimed"));
 });
 
-test("logReviewRun returns a run id and stores findings", () => {
+test("logReviewRun returns a run id and stores findings", async () => {
   const store = new SqliteDedupStore(":memory:");
   const base = {
     prKey: "org/repo#1",
@@ -61,9 +61,9 @@ test("logReviewRun returns a run id and stores findings", () => {
       suggestion: undefined,
     },
   ];
-  const runId = store.logReviewRun(base, findings);
+  const runId = await store.logReviewRun(base, findings);
   assert.ok(typeof runId === "number" && runId > 0);
-  const stored = store.getRunFindings(runId);
+  const stored = await store.getRunFindings(runId);
   assert.equal(stored.length, 2);
   assert.equal(stored[0]?.title, "Null deref");
   assert.equal(stored[0]?.line, 10);
@@ -71,9 +71,9 @@ test("logReviewRun returns a run id and stores findings", () => {
   assert.equal(stored[1]?.suggestion, null);
 });
 
-test("logReviewRun without findings stores run but no findings", () => {
+test("logReviewRun without findings stores run but no findings", async () => {
   const store = new SqliteDedupStore(":memory:");
-  const runId = store.logReviewRun({
+  const runId = await store.logReviewRun({
     prKey: "org/repo#2",
     primaryModel: "gemini-flash",
     primaryTokens: 500,
@@ -89,16 +89,16 @@ test("logReviewRun without findings stores run but no findings", () => {
     escalationReasons: "",
   });
   assert.ok(runId > 0);
-  assert.deepEqual(store.getRunFindings(runId), []);
+  assert.deepEqual(await store.getRunFindings(runId), []);
 });
 
-test("summary comment id: absent, then create-once, then update", () => {
+test("summary comment id: absent, then create-once, then update", async () => {
   const store = new SqliteDedupStore(":memory:");
   const pr = "octo/repo#7";
-  assert.equal(store.getSummaryCommentId(pr), undefined); // first review -> create
-  store.setSummaryCommentId(pr, 111);
-  assert.equal(store.getSummaryCommentId(pr), 111); // synchronize -> update this id
-  store.setSummaryCommentId(pr, 222); // upsert overwrites
-  assert.equal(store.getSummaryCommentId(pr), 222);
-  assert.equal(store.getSummaryCommentId("octo/repo#8"), undefined); // distinct PR
+  assert.equal(await store.getSummaryCommentId(pr), undefined); // first review -> create
+  await store.setSummaryCommentId(pr, 111);
+  assert.equal(await store.getSummaryCommentId(pr), 111); // synchronize -> update this id
+  await store.setSummaryCommentId(pr, 222); // upsert overwrites
+  assert.equal(await store.getSummaryCommentId(pr), 222);
+  assert.equal(await store.getSummaryCommentId("octo/repo#8"), undefined); // distinct PR
 });

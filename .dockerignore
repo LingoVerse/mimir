@@ -5,9 +5,16 @@ data
 .env
 .env.*
 !.env.example
+.dev.vars*
 *.log
 .idea
 .vscode
 .DS_Store
 specs
 README.md
+
+# Cloudflare-only (not needed in the Node/Docker image)
+.flue-vite*
+.wrangler
+wrangler.jsonc
+migrations

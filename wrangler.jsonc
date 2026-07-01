@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mimir",
+  "compatibility_date": "2026-06-01",
+  // Flue's runtime uses Node.js APIs; nodejs_compat also populates process.env
+  // from vars/secrets (compatibility_date >= 2025-04-01), which the app reads.
+  "compatibility_flags": ["nodejs_compat"],
+  // Durable Object migrations for Flue's generated classes. FlueRegistry is
+  // Flue-internal (run indexing); the others are one per discovered workflow.
+  // Never rewrite/reorder a deployed migration entry — append a new tag instead.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "FlueRegistry",
+        "FlueReviewPrWorkflow",
+        "FlueRememberPrWorkflow",
+        "FlueFeedbackPrWorkflow"
+      ]
+    }
+  ],
+  // Application-owned storage (dedup, summary-comment ids, review stats). Create
+  // it once with `wrangler d1 create mimir` and paste the returned id here.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mimir",
+      "database_id": "REPLACE_WITH_wrangler_d1_create_OUTPUT"
+    }
+  ]
+}

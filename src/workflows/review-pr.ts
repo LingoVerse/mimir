@@ -168,7 +168,7 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
       : null;
     const discardCostUsd = decision.escalate ? primaryResult.usage.cost.total : null;
 
-    getReviewRunStore().logReviewRun(
+    await getReviewRunStore().logReviewRun(
       {
         prKey: `${payload.owner}/${payload.repo}#${payload.number}`,
         primaryModel: finalModel,

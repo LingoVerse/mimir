@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildSummaryBody, postReview, visibleFindings } from "./post-review.ts";
-import { SqliteDedupStore } from "./dedup.ts";
+import { SqliteDedupStore } from "./dedup.node.ts";
 import type { Finding, ReviewResult } from "./review.ts";
 
 const findings: Finding[] = [
@@ -107,12 +107,12 @@ test("postReview: no existing id — creates comment and stores id", async () =>
   const result = await postReview(target, makeReview(), meta, fakeClient, store);
   assert.equal(result.summaryCommentId, 42);
   assert.equal(result.summaryUpdated, false);
-  assert.equal(store.getSummaryCommentId("o/r#1"), 42);
+  assert.equal(await store.getSummaryCommentId("o/r#1"), 42);
 });
 
 test("postReview: existing id, update succeeds — summaryUpdated true", async () => {
   const store = new SqliteDedupStore(":memory:");
-  store.setSummaryCommentId("o/r#1", 99);
+  await store.setSummaryCommentId("o/r#1", 99);
   let updatedId: number | undefined;
   const fakeClient = {
     rest: {
@@ -132,7 +132,7 @@ test("postReview: existing id, update succeeds — summaryUpdated true", async (
 
 test("postReview: existing id, update throws 404 — falls back to create, new id stored", async () => {
   const store = new SqliteDedupStore(":memory:");
-  store.setSummaryCommentId("o/r#1", 99);
+  await store.setSummaryCommentId("o/r#1", 99);
   const fakeClient = {
     rest: {
       issues: {
@@ -149,12 +149,12 @@ test("postReview: existing id, update throws 404 — falls back to create, new i
   const result = await postReview(target, makeReview(), meta, fakeClient, store);
   assert.equal(result.summaryCommentId, 77);
   assert.equal(result.summaryUpdated, false);
-  assert.equal(store.getSummaryCommentId("o/r#1"), 77);
+  assert.equal(await store.getSummaryCommentId("o/r#1"), 77);
 });
 
 test("postReview: existing id, update throws 500 — error is re-thrown", async () => {
   const store = new SqliteDedupStore(":memory:");
-  store.setSummaryCommentId("o/r#1", 99);
+  await store.setSummaryCommentId("o/r#1", 99);
   const fakeClient = {
     rest: {
       issues: {

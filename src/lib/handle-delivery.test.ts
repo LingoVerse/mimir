@@ -16,11 +16,11 @@ test("admit succeeds: claim kept, admit called once, returns true", async () => 
   let releaseCalls = 0;
   let admitCalls = 0;
   const deps = {
-    claim: (_id: string) => {
+    claim: async (_id: string) => {
       claimCalls++;
       return true;
     },
-    release: (_id: string) => {
+    release: async (_id: string) => {
       releaseCalls++;
     },
     admit: async (_pr: ReviewPayload) => {
@@ -38,8 +38,8 @@ test("admit throws: claim released and error re-thrown", async () => {
   let releaseCalls = 0;
   let releasedId = "";
   const deps = {
-    claim: (_id: string) => true,
-    release: (id: string) => {
+    claim: async (_id: string) => true,
+    release: async (id: string) => {
       releaseCalls++;
       releasedId = id;
     },
@@ -55,8 +55,8 @@ test("admit throws: claim released and error re-thrown", async () => {
 test("duplicate delivery: admit NOT called, returns false", async () => {
   let admitCalls = 0;
   const deps = {
-    claim: (_id: string) => false,
-    release: (_id: string) => {},
+    claim: async (_id: string) => false,
+    release: async (_id: string) => {},
     admit: async (_pr: ReviewPayload) => {
       admitCalls++;
     },

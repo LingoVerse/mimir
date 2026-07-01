@@ -6,14 +6,14 @@ import type { ReviewPayload } from "./instruction.ts";
 // (skill `.md` imports need Flue's loader, absent under plain `node --test`).
 export async function handlePullRequestDelivery(
   deps: {
-    claim: (id: string) => boolean;
-    release: (id: string) => void;
+    claim: (id: string) => Promise<boolean>;
+    release: (id: string) => Promise<void>;
     admit: (pr: ReviewPayload) => Promise<void>;
   },
   deliveryId: string,
   pr: ReviewPayload,
 ): Promise<boolean> {
-  if (!deps.claim(deliveryId)) {
+  if (!(await deps.claim(deliveryId))) {
     console.log("[mimir] duplicate delivery skipped", deliveryId);
     return false;
   }
@@ -21,7 +21,7 @@ export async function handlePullRequestDelivery(
     await deps.admit(pr);
     return true;
   } catch (err) {
-    deps.release(deliveryId);
+    await deps.release(deliveryId);
     console.log("[mimir] admit failed; released claim for retry", deliveryId);
     throw err;
   }

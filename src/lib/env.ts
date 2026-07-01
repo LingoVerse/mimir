@@ -31,6 +31,9 @@ const EnvSchema = v.object({
   DATABASE_URL: v.optional(v.string()),
   OPENROUTER_REFERER: v.optional(v.string()),
   MIMIR_HANDLE: v.optional(v.string()),
+  // Optional gate for GET /admin. When set, the endpoint requires
+  // `Authorization: Bearer <token>`; unset leaves it open (Docker default).
+  ADMIN_TOKEN: v.optional(v.string()),
 });
 
 export type Env = v.InferOutput<typeof EnvSchema>;

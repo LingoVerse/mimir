@@ -169,7 +169,7 @@ export async function postReview(
   const body = buildSummaryBody(review, meta, postNits, inlineFallback);
 
   // Summary comment: update the prior one (idempotent on synchronize) or create.
-  const existing = injectedStore.getSummaryCommentId(prKey);
+  const existing = await injectedStore.getSummaryCommentId(prKey);
   let summaryCommentId: number;
   let summaryUpdated = false;
   if (existing !== undefined) {
@@ -187,7 +187,7 @@ export async function postReview(
         body,
       });
       summaryCommentId = res.data.id;
-      injectedStore.setSummaryCommentId(prKey, summaryCommentId);
+      await injectedStore.setSummaryCommentId(prKey, summaryCommentId);
       // summaryUpdated stays false: a new comment was created, not updated.
     }
   } else {
@@ -198,7 +198,7 @@ export async function postReview(
       body,
     });
     summaryCommentId = res.data.id;
-    injectedStore.setSummaryCommentId(prKey, summaryCommentId);
+    await injectedStore.setSummaryCommentId(prKey, summaryCommentId);
   }
 
   return { summaryCommentId, summaryUpdated, inlinePosted };

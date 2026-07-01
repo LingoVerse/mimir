@@ -7,7 +7,7 @@
 //   node scripts/export-eval-data.ts --limit 50 > data/reviews.json
 
 import { writeFileSync } from "node:fs";
-import { SqliteDedupStore } from "../src/lib/dedup.ts";
+import { SqliteDedupStore } from "../src/lib/dedup.node.ts";
 
 function parseArgs(): { limit: number; outFile?: string } {
   const args = process.argv.slice(2);
@@ -25,8 +25,8 @@ function parseArgs(): { limit: number; outFile?: string } {
 
 const { limit, outFile } = parseArgs();
 const store = new SqliteDedupStore();
-const data = store.exportRunsWithFindings(limit);
-const stats = store.getStats();
+const data = await store.exportRunsWithFindings(limit);
+const stats = await store.getStats();
 
 const output = {
   exportedAt: new Date().toISOString(),
