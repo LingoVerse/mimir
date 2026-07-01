@@ -40,8 +40,7 @@ Environment:
 
 function parseArgs(): { model: string; fixtureId?: string; noJudge: boolean; help: boolean } {
   const args = process.argv.slice(2);
-  let model =
-    process.env.MODEL_PRIMARY ?? "openrouter/google/gemini-3-flash-preview";
+  let model = process.env.MODEL_PRIMARY ?? "openrouter/google/gemini-3-flash-preview";
   let fixtureId: string | undefined;
   let noJudge = false;
   let help = false;
@@ -69,7 +68,9 @@ function validateFixture(raw: unknown, fileName: string): v.InferOutput<typeof E
     const flat = v.flatten(result.issues);
     const errors = [
       ...(flat.root ?? []),
-      ...Object.entries(flat.nested ?? {}).map(([path, msgs]) => `${path}: ${(msgs ?? []).join(", ")}`),
+      ...Object.entries(flat.nested ?? {}).map(
+        ([path, msgs]) => `${path}: ${(msgs ?? []).join(", ")}`,
+      ),
     ].join("; ");
     throw new Error(`Fixture validation failed for ${fileName}: ${errors}`);
   }
@@ -81,9 +82,7 @@ function loadFixtures(fixtureId?: string): v.InferOutput<typeof EvalFixtureSchem
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".json"))
     .sort();
-  const selected = fixtureId
-    ? files.filter((f) => f.startsWith(fixtureId))
-    : files;
+  const selected = fixtureId ? files.filter((f) => f.startsWith(fixtureId)) : files;
   return selected.map((f) => validateFixture(loadFixture(join(dir, f)), f));
 }
 
@@ -128,9 +127,7 @@ async function main(): Promise<void> {
       const { review, durationMs } = await runFixture(fixture, model, apiKey, skills);
       const recall = computeRecall(fixture, review);
 
-      const judgeScores = noJudge
-        ? []
-        : await judgeFindings(fixture, review, judgeModel, apiKey);
+      const judgeScores = noJudge ? [] : await judgeFindings(fixture, review, judgeModel, apiKey);
 
       // NaN signals "not measured" to the report formatter.
       const precision = noJudge ? NaN : computePrecision(judgeScores, review.findings.length);

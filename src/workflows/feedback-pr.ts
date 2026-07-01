@@ -3,29 +3,36 @@
 // Triggered by the channel when isLikelyFeedback() matches — no explicit command
 // needed, but the curator always has the final say (action: "skip" for noise).
 
-import { type FlueContext, type WorkflowRouteHandler, createAgent } from "@flue/runtime";
+import {
+  type ActionContext,
+  type WorkflowRouteHandler,
+  defineAgent,
+  defineWorkflow,
+} from "@flue/runtime";
+import * as v from "valibot";
 import { client } from "../lib/github.ts";
 import { logEvent } from "../lib/log.ts";
 import { MemoryEntrySchema, commitMemoryEntry } from "../lib/memory.ts";
 import memoryCurator from "../skills/memory-curator/SKILL.md" with { type: "skill" };
 
-export interface FeedbackPayload {
-  owner: string;
-  repo: string;
-  prNumber: number;
-  headRef: string;
-  commentBody: string;
-  commentAuthor: string;
-}
+export const FeedbackPayloadSchema = v.object({
+  owner: v.string(),
+  repo: v.string(),
+  prNumber: v.number(),
+  headRef: v.string(),
+  commentBody: v.string(),
+  commentAuthor: v.string(),
+});
+export type FeedbackPayload = v.InferOutput<typeof FeedbackPayloadSchema>;
 
 const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? "openrouter/google/gemini-3-flash-preview";
 
-const curatorAgent = createAgent(() => ({
+const curatorAgent = defineAgent(() => ({
   model: PRIMARY_MODEL,
   skills: [memoryCurator],
 }));
 
-export async function run({ init, log, payload }: FlueContext<FeedbackPayload>) {
+async function run({ harness, log, input: payload }: ActionContext<typeof FeedbackPayloadSchema>) {
   const prompt = `A maintainer commented on a PR. Extract any actionable feedback, correction,
 convention, or gotcha worth remembering for future reviews. If the comment contains a
 correction, a bug the reviewers missed, a project decision, or a recurring gotcha —
@@ -39,7 +46,6 @@ ${payload.commentBody}
 
 Apply the memory-curator skill. Return JSON only.`;
 
-  const harness = await init(curatorAgent);
   const entry = (await (await harness.session()).prompt(prompt, { result: MemoryEntrySchema }))
     .data;
 
@@ -49,7 +55,7 @@ Apply the memory-curator skill. Return JSON only.`;
       author: payload.commentAuthor,
       reason: entry.reason,
     });
-    return { outcome: "skipped" as const, reason: entry.reason };
+    return { outcome: "skipped" as const, reason: entry.reason, path: null, commitUrl: null };
   }
 
   const r = await commitMemoryEntry(
@@ -63,7 +69,20 @@ Apply the memory-curator skill. Return JSON only.`;
     path: r.path,
     commitUrl: r.commitUrl,
   });
-  return { outcome: "committed" as const, path: r.path, commitUrl: r.commitUrl };
+  return {
+    outcome: "committed" as const,
+    reason: null,
+    path: r.path,
+    commitUrl: r.commitUrl ?? null,
+  };
 }
 
+// Expose POST /workflows/feedback-pr — the admission boundary the channel calls
+// to start a durable run.
 export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export default defineWorkflow({
+  agent: curatorAgent,
+  input: FeedbackPayloadSchema,
+  run,
+});

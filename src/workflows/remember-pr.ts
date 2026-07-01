@@ -1,27 +1,34 @@
-import { type FlueContext, type WorkflowRouteHandler, createAgent } from "@flue/runtime";
+import {
+  type ActionContext,
+  type WorkflowRouteHandler,
+  defineAgent,
+  defineWorkflow,
+} from "@flue/runtime";
+import * as v from "valibot";
 import { client } from "../lib/github.ts";
 import { logEvent } from "../lib/log.ts";
 import { MemoryEntrySchema, commitMemoryEntry } from "../lib/memory.ts";
 import memoryCurator from "../skills/memory-curator/SKILL.md" with { type: "skill" };
 
 // Coordinates passed by the GitHub channel when it admits a /remember run.
-export interface RememberPayload {
-  owner: string;
-  repo: string;
-  prNumber: number;
-  headRef: string;
-  fact: string;
-  source: string;
-}
+export const RememberPayloadSchema = v.object({
+  owner: v.string(),
+  repo: v.string(),
+  prNumber: v.number(),
+  headRef: v.string(),
+  fact: v.string(),
+  source: v.string(),
+});
+export type RememberPayload = v.InferOutput<typeof RememberPayloadSchema>;
 
 const PRIMARY_MODEL = process.env.MODEL_PRIMARY ?? "openrouter/google/gemini-3-flash-preview";
 
-const curatorAgent = createAgent(() => ({
+const curatorAgent = defineAgent(() => ({
   model: PRIMARY_MODEL,
   skills: [memoryCurator],
 }));
 
-export async function run({ init, log, payload }: FlueContext<RememberPayload>) {
+async function run({ harness, log, input: payload }: ActionContext<typeof RememberPayloadSchema>) {
   // `fact` is attacker-influenceable on public repos; the maintainer-gate in the
   // channel is the trust boundary. Wrap it as DATA (delimited) so the curator
   // skill treats it as content to curate, not as instructions to obey.
@@ -34,13 +41,12 @@ ${payload.fact}
 
 Apply the memory-curator skill. Return JSON only.`;
 
-  const harness = await init(curatorAgent);
   const entry = (await (await harness.session()).prompt(prompt, { result: MemoryEntrySchema }))
     .data;
 
   if (entry.action === "skip") {
     logEvent(log, "remember skipped by curator", { source: payload.source, reason: entry.reason });
-    return { outcome: "skipped" as const, reason: entry.reason };
+    return { outcome: "skipped" as const, reason: entry.reason, path: null, commitUrl: null };
   }
 
   // The entry is committed to the PR HEAD branch with a [skip review] marker.
@@ -56,9 +62,20 @@ Apply the memory-curator skill. Return JSON only.`;
     path: r.path,
     commitUrl: r.commitUrl,
   });
-  return { outcome: "committed" as const, path: r.path, commitUrl: r.commitUrl };
+  return {
+    outcome: "committed" as const,
+    reason: null,
+    path: r.path,
+    commitUrl: r.commitUrl ?? null,
+  };
 }
 
 // Expose POST /workflows/remember-pr — the admission boundary the channel calls
 // to start a durable run.
 export const route: WorkflowRouteHandler = async (_c, next) => next();
+
+export default defineWorkflow({
+  agent: curatorAgent,
+  input: RememberPayloadSchema,
+  run,
+});

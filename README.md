@@ -40,11 +40,11 @@ and **SQLite** (delivery dedup + summary-comment tracking + review stats).
 Mimir maintains **durable project memory** in `.mimir/memory/*.md` on the base branch,
 injected into every review as context. Three triggers write to it:
 
-| Trigger | How | Source |
-|---------|-----|--------|
-| **`/remember <fact>`** | Explicit command in a PR comment | `command` |
-| **`/feedback <fact>`** | Alias for `/remember` | `command` |
-| **Auto-detect** | Any substantive (>40 chars) maintainer PR comment — the curator decides | `observed` |
+| Trigger                | How                                                                     | Source     |
+| ---------------------- | ----------------------------------------------------------------------- | ---------- |
+| **`/remember <fact>`** | Explicit command in a PR comment                                        | `command`  |
+| **`/feedback <fact>`** | Alias for `/remember`                                                   | `command`  |
+| **Auto-detect**        | Any substantive (>40 chars) maintainer PR comment — the curator decides | `observed` |
 
 The memory-curator skill (AI-driven) extracts the decision, convention, or gotcha and commits
 it as a well-scoped markdown file. Future reviews see it through `fetchProjectContext()`.
@@ -71,23 +71,23 @@ production deploy — is in **[DEPLOY.md](DEPLOY.md)**.
 All model selection is env, so swapping models is a config change. The app **validates env at
 startup** and refuses to boot if a required var is missing or malformed.
 
-| Var                         | Required | Default                                    | Purpose                                                         |
-| --------------------------- | :------: | ------------------------------------------ | --------------------------------------------------------------- |
-| `OPENROUTER_API_KEY`        |    ✅    | —                                          | LLM access (all models via OpenRouter)                          |
-| `GITHUB_WEBHOOK_SECRET`     |    ✅    | —                                          | verify inbound webhook signatures                               |
-| `GITHUB_TOKEN`              |    ✅    | —                                          | read the diff + post comments                                   |
-| `MODEL_PRIMARY`             |          | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR                                    |
-| `MODEL_ESCALATION`          |          | `openrouter/z-ai/glm-5.2`                  | stronger pass on hard diffs                                     |
-| `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                            |
+| Var                         | Required | Default                                    | Purpose                                                                   |
+| --------------------------- | :------: | ------------------------------------------ | ------------------------------------------------------------------------- |
+| `OPENROUTER_API_KEY`        |    ✅    | —                                          | LLM access (all models via OpenRouter)                                    |
+| `GITHUB_WEBHOOK_SECRET`     |    ✅    | —                                          | verify inbound webhook signatures                                         |
+| `GITHUB_TOKEN`              |    ✅    | —                                          | read the diff + post comments                                             |
+| `MODEL_PRIMARY`             |          | `openrouter/google/gemini-3-flash-preview` | cheap pass, runs on every PR                                              |
+| `MODEL_ESCALATION`          |          | `openrouter/z-ai/glm-5.2`                  | stronger pass on hard diffs                                               |
+| `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                                      |
 | `ESCALATE_SECURITY_ALWAYS`  |          | `true`                                     | always escalate on security-sensitive paths (vs only when findings exist) |
-| `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                   |
-| `REPO_TOOL_CALL_BUDGET`     |          | auto                                       | pin per-pass repo-tool calls (else scales ~1/reviewed file)     |
-| `REPO_TOOL_CALL_BUDGET_MAX` |          | `40`                                       | cap when the tool-call budget auto-scales with PR size          |
-| `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                               |
-| `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review |
-| `MIMIR_HANDLE`              |          | `mimir`                                    | GitHub handle for `@handle remember` / `@handle review` commands |
-| `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or a bare path)                    |
-| `INTERNAL_BASE_URL`         |          | request origin                             | loopback used to admit review runs behind a proxy               |
+| `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                             |
+| `REPO_TOOL_CALL_BUDGET`     |          | auto                                       | pin per-pass repo-tool calls (else scales ~1/reviewed file)               |
+| `REPO_TOOL_CALL_BUDGET_MAX` |          | `40`                                       | cap when the tool-call budget auto-scales with PR size                    |
+| `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                                         |
+| `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review           |
+| `MIMIR_HANDLE`              |          | `mimir`                                    | GitHub handle for `@handle remember` / `@handle review` commands          |
+| `DATABASE_URL`              |          | `./data/mimir.db`                          | sqlite path (`sqlite:<path>` or a bare path)                              |
+| `INTERNAL_BASE_URL`         |          | request origin                             | loopback used to admit review runs behind a proxy                         |
 
 ## Project layout
 

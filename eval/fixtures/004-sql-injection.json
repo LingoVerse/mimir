@@ -19,7 +19,14 @@
       "description": "searchUsers builds SQL via template literal string interpolation — both query and role parameters are injectable"
     },
     {
-      "mustMatchKeywords": ["injection", "sql", "template", "interpolat", "parameteriz", "deleteUser"],
+      "mustMatchKeywords": [
+        "injection",
+        "sql",
+        "template",
+        "interpolat",
+        "parameteriz",
+        "deleteUser"
+      ],
       "severity": "critical",
       "description": "deleteUser was changed from parameterized to string interpolation — id is directly injectable"
     }

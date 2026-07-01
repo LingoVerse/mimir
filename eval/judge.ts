@@ -8,18 +8,19 @@ function stripModelPrefix(model: string): string {
   return model.replace(/^openrouter\//, "");
 }
 
-function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 120_000): Promise<Response> {
+function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = 120_000,
+): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
-
 function buildJudgePrompt(fixture: EvalFixture, review: ReviewResult): string {
   if (review.findings.length === 0) return "";
-  const diffSnippet = fixture.files
-    .map((f) => `${f.filename}:\n${f.patch}`)
-    .join("\n\n");
+  const diffSnippet = fixture.files.map((f) => `${f.filename}:\n${f.patch}`).join("\n\n");
   const findingsList = review.findings
     .map(
       (f, i) =>
@@ -91,11 +92,16 @@ export async function judgeFindings(
   }
   const arr = (parsed as Record<string, unknown>).scores;
   if (!Array.isArray(arr)) {
-    throw new Error(`Judge response missing "scores" array: ${JSON.stringify(parsed).slice(0, 200)}`);
+    throw new Error(
+      `Judge response missing "scores" array: ${JSON.stringify(parsed).slice(0, 200)}`,
+    );
   }
 
   return (arr as unknown[])
-    .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item))
+    .filter(
+      (item): item is Record<string, unknown> =>
+        item !== null && typeof item === "object" && !Array.isArray(item),
+    )
     .map((item) => {
       const idx = Number(item["index"]);
       const sc = Number(item["score"]);

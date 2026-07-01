@@ -62,7 +62,7 @@ test("repoContextTools executes within budget", async () => {
   });
   const [, listDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
   assert.ok(listDir);
-  await listDir.execute({ path: "" });
+  await listDir.run({ input: { path: "" } });
   assert.equal(hits, 1);
 });
 
@@ -77,9 +77,9 @@ test("repoContextTools blocks calls over budget", async () => {
   try {
     const [, listDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
     assert.ok(listDir);
-    await listDir.execute({ path: "" });
-    await listDir.execute({ path: "" });
-    const result = await listDir.execute({ path: "" });
+    await listDir.run({ input: { path: "" } });
+    await listDir.run({ input: { path: "" } });
+    const result = await listDir.run({ input: { path: "" } });
     assert.match(result, /budget exhausted/);
     assert.equal(hits, 2);
   } finally {
@@ -100,8 +100,8 @@ test("repoContextTools budget is shared across tools", async () => {
     const [, listDir, searchTool] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
     assert.ok(listDir);
     assert.ok(searchTool);
-    await listDir.execute({ path: "" });
-    const result = await searchTool.execute({ query: "foo" });
+    await listDir.run({ input: { path: "" } });
+    const result = await searchTool.run({ input: { query: "foo" } });
     assert.match(result, /budget exhausted/);
     assert.equal(hits, 1);
   } finally {
@@ -126,11 +126,11 @@ test("repoContextTools budget is independent per instance", async () => {
     assert.ok(primaryListDir);
     assert.ok(escalationListDir);
     // Primary exhausts its own budget.
-    await primaryListDir.execute({ path: "" });
-    const primaryBlocked = await primaryListDir.execute({ path: "" });
+    await primaryListDir.run({ input: { path: "" } });
+    const primaryBlocked = await primaryListDir.run({ input: { path: "" } });
     assert.match(primaryBlocked, /budget exhausted/);
     // Escalation still has its full budget — not affected by the primary pass.
-    const escalationResult = await escalationListDir.execute({ path: "" });
+    const escalationResult = await escalationListDir.run({ input: { path: "" } });
     assert.doesNotMatch(escalationResult, /budget exhausted/);
     assert.equal(hits, 2);
   } finally {
