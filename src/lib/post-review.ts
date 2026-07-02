@@ -36,6 +36,9 @@ export interface PostMeta {
 
 // Hidden marker on our summary comment (fallback identity if the stored id is lost).
 const MARKER = "<!-- mimir-summary -->";
+// Marker on the failure notice (kept distinct from the summary so a failed run
+// never overwrites a good review).
+const FAIL_MARKER = "<!-- mimir-review-failed -->";
 
 const VERDICT_LABEL: Record<ReviewResult["verdict"], string> = {
   request_changes: "🔴 Changes requested",
@@ -226,4 +229,47 @@ export async function postReview(
   }
 
   return { summaryCommentId, summaryUpdated, inlinePosted, inlineSuppressed };
+}
+
+// Surface a review that threw before it could post. The primary/escalation pass
+// can fail non-retryably (e.g. a model context-size overflow); without this the
+// run dies after the webhook's 200 with nothing on the PR — a silent failure.
+// Idempotent on its own `::failed` key so a re-run updates one notice, and stored
+// separately from the summary so it never clobbers a prior good review.
+export async function postReviewFailure(
+  target: Pick<ReviewTarget, "owner" | "repo" | "number">,
+  error: unknown,
+  injectedClient: Octokit,
+  injectedStore: SummaryCommentStore = getSummaryCommentStore(),
+): Promise<void> {
+  const { owner, repo, number } = target;
+  const reason = (error instanceof Error ? error.message : String(error)).slice(0, 800);
+  const body = [
+    FAIL_MARKER,
+    "## ⚠️ Mimir review failed",
+    "",
+    "The review didn't complete — usually a transient model/provider error or a context-size limit. Re-run with `/review`.",
+    "",
+    "<details><summary>Details</summary>",
+    "",
+    "```",
+    reason,
+    "```",
+    "",
+    "</details>",
+  ].join("\n");
+
+  const key = `${owner}/${repo}#${number}::failed`;
+  const existing = await injectedStore.getSummaryCommentId(key);
+  if (existing !== undefined) {
+    try {
+      await injectedClient.rest.issues.updateComment({ owner, repo, comment_id: existing, body });
+      return;
+    } catch (err) {
+      if ((err as { status?: number }).status !== 404) throw err;
+      // Stored id is stale (comment deleted); fall through to create a new one.
+    }
+  }
+  const res = await injectedClient.rest.issues.createComment({ owner, repo, issue_number: number, body });
+  await injectedStore.setSummaryCommentId(key, res.data.id);
 }

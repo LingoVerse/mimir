@@ -6,7 +6,7 @@ import { fetchIgnoreMatcher } from "../lib/ignore.ts";
 import { ReviewPayloadSchema, buildInstruction } from "../lib/instruction.ts";
 import { getReviewRunStore } from "../lib/dedup.ts";
 import { logEvent } from "../lib/log.ts";
-import { postReview } from "../lib/post-review.ts";
+import { postReview, postReviewFailure } from "../lib/post-review.ts";
 import {
   fetchExistingReviewDiscussion,
   renderExistingReviewDiscussion,
@@ -35,7 +35,7 @@ const reviewer = defineAgent(() => ({
   skills: [reviewRubric, securityCheck],
 }));
 
-async function run({ harness, log, input: payload }: ActionContext<typeof ReviewPayloadSchema>) {
+async function runReview({ harness, log, input: payload }: ActionContext<typeof ReviewPayloadSchema>) {
   // GitHub App: authenticate as the installation from the webhook payload so all
   // outbound calls (diff, context, repo tools, posting) act as the correct org's
   // bot. PAT auth / missing id fall back inside githubClient().
@@ -232,6 +232,24 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
     posted,
     review,
   };
+}
+
+// Thin wrapper so a review that throws (e.g. a model context-size overflow) is
+// surfaced as a PR comment instead of dying silently after the webhook's 200.
+// githubClient() is cached per installation, so re-resolving it here is cheap.
+async function run(ctx: ActionContext<typeof ReviewPayloadSchema>) {
+  try {
+    return await runReview(ctx);
+  } catch (err) {
+    const { log, input: payload } = ctx;
+    logEvent(log, "review failed", { error: String(err).slice(0, 500) });
+    try {
+      await postReviewFailure(payload, err, githubClient(payload.installationId));
+    } catch (postErr) {
+      logEvent(log, "review-failure notice failed", { error: String(postErr) });
+    }
+    return { pr: payload, failed: true, error: String(err).slice(0, 500) };
+  }
 }
 
 // No `route` export: the workflow is admitted only via ambient `invoke()` from
