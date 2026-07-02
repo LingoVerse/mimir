@@ -34,6 +34,9 @@ const EnvSchema = v.object({
     v.picklist(["true", "false"], 'ESCALATE_SECURITY_ALWAYS must be "true" or "false"'),
   ),
   SKIP_LABELS: v.optional(v.string()),
+  // Comma-separated allowlist of repo owners (logins/orgs) the bot serves. Unset
+  // → all owners. Required in practice for a publicly-installable GitHub App.
+  ALLOWED_OWNERS: v.optional(v.string()),
   DATABASE_URL: v.optional(v.string()),
   OPENROUTER_REFERER: v.optional(v.string()),
   MIMIR_HANDLE: v.optional(v.string()),

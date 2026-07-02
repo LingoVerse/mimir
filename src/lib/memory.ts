@@ -60,6 +60,22 @@ export function hasSkipLabel(labels: string[]): boolean {
   return labels.some((l) => skip.has(l.toLowerCase()));
 }
 
+// Allowlist of repo owners (user or org logins) the bot will act on. When
+// ALLOWED_OWNERS is set (comma-separated, case-insensitive), events for any
+// other owner are ignored — the guard for a publicly-installable GitHub App so
+// it only serves approved accounts even if someone else installs it. Unset →
+// allow all (only safe for a private App or a webhook you fully control).
+export function isOwnerAllowed(owner: string, raw = process.env.ALLOWED_OWNERS): boolean {
+  if (!raw) return true;
+  const allowed = new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return allowed.has(owner.toLowerCase());
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -6,11 +6,20 @@ import {
   hasSkipLabel,
   hasSkipMarker,
   isMaintainer,
+  isOwnerAllowed,
   memoryPath,
   parseRememberCommand,
   parseReviewCommand,
   renderEntry,
 } from "./memory.ts";
+
+test("isOwnerAllowed: unset allows all; set gates case-insensitively", () => {
+  assert.equal(isOwnerAllowed("anyone", undefined), true); // unset → allow all
+  assert.equal(isOwnerAllowed("anyone", ""), true); // empty → allow all
+  assert.equal(isOwnerAllowed("Acme", "acme, lapa2112"), true);
+  assert.equal(isOwnerAllowed("LAPA2112", " acme , lapa2112 "), true); // trims + case-insensitive
+  assert.equal(isOwnerAllowed("intruder", "acme,lapa2112"), false);
+});
 
 const sampleEntry: MemoryEntry = {
   action: "create",

@@ -9,6 +9,7 @@ import {
   hasSkipMarker,
   isLikelyFeedback,
   isMaintainer,
+  isOwnerAllowed,
   parseRememberCommand,
   parseReviewCommand,
 } from "../lib/memory.ts";
@@ -27,6 +28,16 @@ try {
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));
   throw err;
+}
+
+// Security: a publicly-installable GitHub App with no owner allowlist serves any
+// account that installs it (once the App webhook is on). Warn loudly so it isn't
+// missed — set ALLOWED_OWNERS, or make the App private.
+if (process.env.GITHUB_APP_ID && !process.env.ALLOWED_OWNERS) {
+  console.warn(
+    "[mimir] SECURITY: GitHub App auth without ALLOWED_OWNERS — if the App is public and its " +
+      "webhook is enabled, any account that installs it will be served. Set ALLOWED_OWNERS.",
+  );
 }
 
 // PR actions that trigger a review. Subscribe to `pull_request` (these actions)
@@ -73,6 +84,17 @@ export const channel = createGitHubChannel({
   // and does not auto-retry, so verify, admit durable work, and return fast —
   // never block the response on diff fetching or LLM calls.
   async webhook({ c, delivery }) {
+    // Allowlist gate (before any work): ignore events whose repo owner isn't in
+    // ALLOWED_OWNERS. This is the guard for a publicly-installable App — it stops
+    // arbitrary installers from being served, covering both auto-review and
+    // commands. Repo-less events (e.g. `ping`) have no owner and fall through.
+    const eventOwner = (delivery.payload as { repository?: { owner?: { login?: string } } })
+      .repository?.owner?.login;
+    if (eventOwner && !isOwnerAllowed(eventOwner)) {
+      console.log("[mimir] owner not allowlisted, ignoring", eventOwner);
+      return;
+    }
+
     // On Cloudflare the channel runs in the main worker (outside Flue's context),
     // so the D1 binding comes from Hono's c.env; on Node c.env has no DB and the
     // store falls back to node:sqlite.
