@@ -66,6 +66,12 @@ test("isSafeSandboxCommand rejects shell control operators", () => {
   assert.equal(isSafeSandboxCommand("rg foo | wc -l"), false);
 });
 
+test("isSafeSandboxCommand rejects rg's pre-processor flags", () => {
+  assert.equal(isSafeSandboxCommand("rg --pre=sh foo"), false);
+  assert.equal(isSafeSandboxCommand("rg --pre-glob='*.ts' foo"), false);
+  assert.equal(isSafeSandboxCommand('rg "createUser" src'), true);
+});
+
 test("isSafeSandboxCommand rejects find's exec/write primaries", () => {
   assert.equal(isSafeSandboxCommand("find . -exec id +"), false);
   assert.equal(isSafeSandboxCommand("find . -execdir id {} +"), false);

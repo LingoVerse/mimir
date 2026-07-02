@@ -82,8 +82,13 @@ function commandName(command: string): string | null {
 // so they must be rejected on find's own arguments.
 const FIND_UNSAFE_FLAGS = /(?:^|\s)-(exec|execdir|ok|okdir|delete|fprint|fprintf|fls)\b/;
 
+// ripgrep's --pre/--pre-glob run an arbitrary command against every searched
+// file, turning a "read-only" search into command execution.
+const RG_UNSAFE_FLAGS = /(?:^|\s)--pre(?:=|-glob\b|-glob=)/;
+
 function isSafeCommandArgs(name: string, command: string): boolean {
   if (name === "find") return !FIND_UNSAFE_FLAGS.test(command);
+  if (name === "rg") return !RG_UNSAFE_FLAGS.test(command);
   return true;
 }
 
@@ -258,7 +263,7 @@ export function repoContextTools(
   const runRepoCommand = defineTool({
     name: "run_repo_command",
     description:
-      "Run a bounded shell command in a persistent sandbox checkout of the PR head ref. Prefer rg/grep/sed/jq/find for targeted code review context. The checkout is reused until the PR closes or local TTL cleanup removes it. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
+      "Run a bounded shell command in a persistent sandbox checkout of the PR head ref. Prefer rg/grep/jq/find for targeted code review context. The checkout is reused until the PR closes or local TTL cleanup removes it. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
     input: v.object({
       command: v.pipe(
         v.string(),
