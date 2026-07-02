@@ -7,6 +7,10 @@ import { ReviewPayloadSchema, buildInstruction } from "../lib/instruction.ts";
 import { getReviewRunStore } from "../lib/dedup.ts";
 import { logEvent } from "../lib/log.ts";
 import { postReview } from "../lib/post-review.ts";
+import {
+  fetchExistingReviewDiscussion,
+  renderExistingReviewDiscussion,
+} from "../lib/pr-discussion.ts";
 import { fetchProjectContext, fetchProjectTree } from "../lib/project-context.ts";
 import { repoContextTools, repoSandboxId } from "../lib/repo-tools.ts";
 import { withRetry } from "../lib/retry.ts";
@@ -65,8 +69,17 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
     repo: payload.repo,
     ref: payload.baseRef,
   });
+  let existingDiscussion: string | null = null;
+  try {
+    existingDiscussion = renderExistingReviewDiscussion(
+      await fetchExistingReviewDiscussion(gh, payload),
+    );
+  } catch (err) {
+    logEvent(log, "existing review discussion fetch failed", { error: String(err) });
+  }
   const projectTree = await fetchProjectTree(gh, toolRef);
   const instruction = buildInstruction(payload, diff, securitySensitive, projectContext, {
+    existingDiscussion,
     projectTree,
   });
   const tools = repoContextTools(gh, toolRef, diff.files.length, sandboxOptions);
@@ -107,6 +120,7 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
       projectContext,
       {
         projectTree,
+        existingDiscussion,
         scopeFiles: decision.scopeFiles,
         priorReview: {
           summary: primary.summary,
@@ -162,6 +176,7 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
     summaryCommentId: posted.summaryCommentId,
     summaryUpdated: posted.summaryUpdated,
     inlinePosted: posted.inlinePosted,
+    inlineSuppressed: posted.inlineSuppressed,
   });
 
   // Store review run stats for the admin endpoint.
