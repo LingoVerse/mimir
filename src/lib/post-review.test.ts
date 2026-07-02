@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildSummaryBody, postReview, visibleFindings } from "./post-review.ts";
+import { buildSummaryBody, postReview, postReviewFailure, visibleFindings } from "./post-review.ts";
 import { SqliteDedupStore } from "./dedup.node.ts";
 import { findingMarker } from "./pr-discussion.ts";
 import type { Finding, ReviewResult } from "./review.ts";
@@ -223,4 +223,141 @@ test("postReview: suppresses duplicate inline comments by fingerprint", async ()
   assert.equal(result.inlinePosted, 1);
   assert.equal(postedComments.length, 1);
   assert.equal(postedComments[0]!.path, "b.ts");
+});
+
+test("postReviewFailure: no existing id — creates notice with marker, stores under ::failed key", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  let created: { issue_number: number; body: string } | undefined;
+  const fakeClient = {
+    rest: {
+      issues: {
+        createComment: async (args: { issue_number: number; body: string }) => {
+          created = args;
+          return { data: { id: 55 } };
+        },
+      },
+    },
+  } as never;
+  await postReviewFailure(target, new Error("boom overflow"), fakeClient, store);
+  assert.equal(created?.issue_number, 1);
+  assert.match(created!.body, /<!-- mimir-review-failed -->/);
+  assert.match(created!.body, /Mimir review failed/);
+  assert.match(created!.body, /boom overflow/);
+  assert.equal(await store.getSummaryCommentId("o/r#1::failed"), 55);
+  // The summary key is untouched — a failure never clobbers a good review.
+  assert.equal(await store.getSummaryCommentId("o/r#1"), undefined);
+});
+
+test("postReviewFailure: existing id — updates that notice, does not create", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  await store.setSummaryCommentId("o/r#1::failed", 88);
+  let updatedId: number | undefined;
+  let created = false;
+  const fakeClient = {
+    rest: {
+      issues: {
+        updateComment: async ({ comment_id }: { comment_id: number }) => {
+          updatedId = comment_id;
+        },
+        createComment: async () => {
+          created = true;
+          return { data: { id: 999 } };
+        },
+      },
+    },
+  } as never;
+  await postReviewFailure(target, new Error("boom"), fakeClient, store);
+  assert.equal(updatedId, 88);
+  assert.equal(created, false);
+});
+
+test("postReviewFailure: existing id, update 404 — falls back to create, new id stored", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  await store.setSummaryCommentId("o/r#1::failed", 88);
+  const fakeClient = {
+    rest: {
+      issues: {
+        updateComment: async () => {
+          const e = new Error("Not Found") as Error & { status: number };
+          e.status = 404;
+          throw e;
+        },
+        createComment: async () => ({ data: { id: 91 } }),
+      },
+    },
+  } as never;
+  await postReviewFailure(target, new Error("boom"), fakeClient, store);
+  assert.equal(await store.getSummaryCommentId("o/r#1::failed"), 91);
+});
+
+test("postReviewFailure: non-Error throw is stringified into the body", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  let body = "";
+  const fakeClient = {
+    rest: {
+      issues: {
+        createComment: async (a: { body: string }) => {
+          body = a.body;
+          return { data: { id: 1 } };
+        },
+      },
+    },
+  } as never;
+  await postReviewFailure(target, "plain string failure", fakeClient, store);
+  assert.match(body, /plain string failure/);
+});
+
+test("postReviewFailure: sanitizes ``` in the reason so it can't break the fenced block", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  let body = "";
+  const fakeClient = {
+    rest: {
+      issues: {
+        createComment: async (a: { body: string }) => {
+          body = a.body;
+          return { data: { id: 1 } };
+        },
+      },
+    },
+  } as never;
+  await postReviewFailure(target, new Error("bad ``` inside"), fakeClient, store);
+  assert.ok(!body.includes("bad ``` inside"));
+  assert.match(body, /bad ` ` ` inside/);
+});
+
+test("postReview: a successful review retracts a stored failure notice", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  await store.setSummaryCommentId("o/r#1::failed", 70);
+  let deletedId: number | undefined;
+  const fakeClient = {
+    rest: {
+      issues: {
+        createComment: async () => ({ data: { id: 42 } }),
+        deleteComment: async ({ comment_id }: { comment_id: number }) => {
+          deletedId = comment_id;
+        },
+      },
+      pulls: { createReview: async () => ({}) },
+    },
+  } as never;
+  await postReview(target, makeReview(), meta, fakeClient, store);
+  assert.equal(deletedId, 70);
+});
+
+test("postReview: retract swallows a failed delete (already gone / missing perms)", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  await store.setSummaryCommentId("o/r#1::failed", 70);
+  const fakeClient = {
+    rest: {
+      issues: {
+        createComment: async () => ({ data: { id: 42 } }),
+        deleteComment: async () => {
+          throw new Error("gone");
+        },
+      },
+      pulls: { createReview: async () => ({}) },
+    },
+  } as never;
+  const result = await postReview(target, makeReview(), meta, fakeClient, store);
+  assert.equal(result.summaryCommentId, 42);
 });

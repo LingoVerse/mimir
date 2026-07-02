@@ -39,6 +39,30 @@ const MARKER = "<!-- mimir-summary -->";
 // Marker on the failure notice (kept distinct from the summary so a failed run
 // never overwrites a good review).
 const FAIL_MARKER = "<!-- mimir-review-failed -->";
+// Store key for the failure notice — namespaced off the PR key so it never
+// collides with the stored summary-comment id.
+function failureKey(owner: string, repo: string, number: number): string {
+  return `${owner}/${repo}#${number}::failed`;
+}
+
+// Best-effort retract a stored failure notice so a later success doesn't leave
+// it lingering beside the good review. The stored id is intentionally left as-is:
+// if the comment is already gone, postReviewFailure's 404-fallback re-creates
+// cleanly next time.
+async function retractFailureNotice(
+  target: Pick<ReviewTarget, "owner" | "repo" | "number">,
+  client: Octokit,
+  store: SummaryCommentStore,
+): Promise<void> {
+  const { owner, repo, number } = target;
+  const existing = await store.getSummaryCommentId(failureKey(owner, repo, number));
+  if (existing === undefined) return;
+  try {
+    await client.rest.issues.deleteComment({ owner, repo, comment_id: existing });
+  } catch {
+    // Already deleted or insufficient permission — nothing to retract.
+  }
+}
 
 const VERDICT_LABEL: Record<ReviewResult["verdict"], string> = {
   request_changes: "🔴 Changes requested",
@@ -228,6 +252,10 @@ export async function postReview(
     await injectedStore.setSummaryCommentId(prKey, summaryCommentId);
   }
 
+  // A successful review retracts any lingering failure notice from an earlier
+  // failed run, so the PR never shows a good review beside a stale "failed" one.
+  await retractFailureNotice({ owner, repo, number }, injectedClient, injectedStore);
+
   return { summaryCommentId, summaryUpdated, inlinePosted, inlineSuppressed };
 }
 
@@ -243,7 +271,11 @@ export async function postReviewFailure(
   injectedStore: SummaryCommentStore = getSummaryCommentStore(),
 ): Promise<void> {
   const { owner, repo, number } = target;
-  const reason = (error instanceof Error ? error.message : String(error)).slice(0, 800);
+  // Neutralize any ``` in the message so it can't prematurely close the fenced
+  // block below — the injected spaces break the run without dropping characters.
+  const reason = (error instanceof Error ? error.message : String(error))
+    .slice(0, 800)
+    .replaceAll("```", "` ` `");
   const body = [
     FAIL_MARKER,
     "## ⚠️ Mimir review failed",
@@ -259,7 +291,7 @@ export async function postReviewFailure(
     "</details>",
   ].join("\n");
 
-  const key = `${owner}/${repo}#${number}::failed`;
+  const key = failureKey(owner, repo, number);
   const existing = await injectedStore.getSummaryCommentId(key);
   if (existing !== undefined) {
     try {
