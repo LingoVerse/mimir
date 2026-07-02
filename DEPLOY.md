@@ -46,16 +46,44 @@ Mimir reads the PR/diff and posts the review. Pick how it authenticates:
 > ⚠️ Either way, **`Pull requests` must be `Read and write`.** With read-only the review runs
 > but posting silently `403`s and **no comment appears** — the most common setup mistake.
 
-**GitHub App** (<https://github.com/settings/apps> → **New GitHub App**):
+**Set up the GitHub App** — one-time, ~5 minutes. Produces three values:
+`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`.
 
-1. **Repository permissions:** **Contents: Read-only**, **Pull requests: Read and write**.
-2. **Webhook:** leave it off and keep the repo webhook from §2a (it already delivers events) —
-   the App is used only for the bot identity + write access.
-3. Create → note the **App ID**; **Generate a private key** (downloads a `.pem`).
-4. **Install App** → select the repo(s). The install URL ends `…/installations/<ID>` — that
-   number is `GITHUB_APP_INSTALLATION_ID`.
-5. Secrets: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (full `.pem` contents),
-   `GITHUB_APP_INSTALLATION_ID`.
+1. **Create the App:** <https://github.com/settings/apps> → **New GitHub App**.
+   - **GitHub App name:** what shows as the reviewer, e.g. `mimir-reviewer` (globally unique;
+     becomes the `<name>[bot]` login).
+   - **Homepage URL:** anything (e.g. your repo URL).
+   - **Webhook → Active:** **uncheck it.** Events are already delivered by the repo webhook
+     from §2a; the App is used only for the bot identity + write access. _(Advanced: instead
+     point the App webhook at the same URL + secret and drop the repo webhook.)_
+   - **Repository permissions:** **Contents → Read-only**, **Pull requests → Read and write**
+     (leave everything else "No access").
+   - **Where can this app be installed:** "Only on this account".
+   - **Create GitHub App.**
+2. On the App page, copy the **App ID** (near the top) → this is `GITHUB_APP_ID`.
+3. Scroll to **Private keys → Generate a private key**. A `.pem` downloads — it is the App's
+   credential, keep it safe.
+4. Left sidebar **Install App → Install** on your account/org → **Only select repositories** →
+   pick the repo(s) to review → **Install**. The resulting URL is
+   `…/settings/installations/<NUMBER>` — that `<NUMBER>` is `GITHUB_APP_INSTALLATION_ID`.
+5. Give the three values to Mimir as env/secrets (§3 Docker, or §4 Cloudflare
+   `wrangler secret put`). For the private key, see the note below.
+
+> 🔑 **Private-key format on Cloudflare.** GitHub issues the key as PKCS#1
+> (`-----BEGIN RSA PRIVATE KEY-----`); Workers' Web Crypto wants PKCS#8. Convert once, then
+> store the result:
+>
+> ```bash
+> openssl pkcs8 -topk8 -nocrypt -in your-app.private-key.pem | \
+>   bunx wrangler secret put GITHUB_APP_PRIVATE_KEY
+> ```
+>
+> Node/Docker accepts the raw `.pem` unchanged. Multi-line values are fine; `\n`-escaped
+> newlines are also accepted.
+
+> 🔁 **Migrating an existing PR from PAT to App.** A summary comment first created by a PAT
+> keeps its original author when the App later _updates_ it. Delete that one comment — the next
+> review recreates it as `<name>[bot]`. New PRs are bot-authored from the start.
 
 **Personal access token** (simpler; comments authored by you):
 
