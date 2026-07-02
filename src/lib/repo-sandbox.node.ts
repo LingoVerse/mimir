@@ -11,6 +11,23 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
+// Commands run untrusted repo content, so hand the child only the env a shell
+// and dev tools need — never the runner's secrets (GitHub App key, model API
+// keys, DATABASE_URL). This also neutralises `awk 'BEGIN{print ENVIRON["X"]}'`,
+// which reads no file and uses no blocked metacharacter but would otherwise
+// exfiltrate the process env. The Cloudflare runner is unaffected: its commands
+// execute inside an isolated container that never sees the worker's env.
+const ENV_ALLOWLIST = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TZ"];
+
+function scrubbedEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 function truncate(text: string, maxChars: number): string {
   return text.length > maxChars
     ? `${text.slice(0, maxChars)}\n... [truncated ${text.length - maxChars} chars]`
@@ -102,17 +119,20 @@ export const runRepoSandboxCommand: RepoSandboxRunner = async ({
     await writeFile(markerPath, checkoutKey);
   }
 
+  const env = scrubbedEnv();
   try {
     const executable = command.trim().split(/\s+/, 1)[0];
     if (executable) {
       await execFileAsync("/usr/bin/env", ["sh", "-c", `command -v ${executable}`], {
         timeout: 5_000,
+        env,
       });
     }
     const result = await execFileAsync("/bin/sh", ["-c", command], {
       cwd: checkoutPath,
       timeout: timeoutMs,
       maxBuffer: maxOutputChars * 4,
+      env,
     });
     return { output: truncate([result.stdout, result.stderr].filter(Boolean).join("\n"), maxOutputChars) };
   } finally {
