@@ -19,9 +19,11 @@ const READ_ONLY_COMMANDS = new Set([
   "awk",
   "find",
   "grep",
+  "head",
   "jq",
   "ls",
   "rg",
+  "tail",
   "wc",
 ]);
 const EXEC_COMMANDS = new Set([
@@ -269,7 +271,7 @@ export function repoContextTools(
   const runRepoCommand = defineTool({
     name: "run_repo_command",
     description:
-      "Primary repo-context tool: run a bounded shell command in a persistent sandbox checkout of the full PR head repo. Use targeted read-only commands like rg/grep/jq/find/ls/awk/wc to locate symbols, callers, and small snippets instead of loading whole files. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
+      "Primary repo-context tool: run a bounded shell command in a persistent sandbox checkout of the full PR head repo. Use targeted read-only commands like rg/grep/head/tail/jq/find/ls/awk/wc to locate symbols, callers, and inspect small file snippets instead of loading whole files. Examples: `rg -n -C 4 \"Button\" packages/design-system`, `head -n 120 packages/design-system/index.tsx`, `grep -n \"\" packages/design-system/package.json`. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
     input: v.object({
       command: v.pipe(
         v.string(),
@@ -283,7 +285,7 @@ export function repoContextTools(
       if (!isSafeSandboxCommand(command)) {
         return (
           `Command not allowed: ${commandName(command) ?? "<empty>"}. ` +
-          "Allowed by default: awk, find, grep, jq, ls, rg, wc. " +
+          "Allowed by default: awk, find, grep, head, jq, ls, rg, tail, wc. " +
           "Shell control operators are blocked. Set REPO_SANDBOX_ALLOW_EXEC=1 for build/test commands."
         );
       }

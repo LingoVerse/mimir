@@ -58,6 +58,8 @@ test("repoContextTools adds dependency_review when base ref is available", () =>
 
 test("isSafeSandboxCommand allows simple read-only commands", () => {
   assert.equal(isSafeSandboxCommand('rg "createUser" src'), true);
+  assert.equal(isSafeSandboxCommand("head -n 120 packages/design-system/index.tsx"), true);
+  assert.equal(isSafeSandboxCommand("tail -n 80 packages/design-system/index.tsx"), true);
   assert.equal(isSafeSandboxCommand("jq . package.json"), true);
 });
 

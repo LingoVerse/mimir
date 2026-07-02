@@ -63,8 +63,9 @@ export function buildInstruction(
       ? "This diff changes security-sensitive paths — also apply the `security-check` skill and merge its findings."
       : null,
     "For small/simple PRs, the diff alone may be enough; avoid extra repo reads unless context is needed for a concrete finding.",
-    "When you need repository context, start with `run_repo_command`. It runs against a full checkout of the PR head in a persistent sandbox, so targeted commands like `rg`, `grep`, `jq`, `find`, `ls`, `awk`, and `wc` are faster and cheaper than loading whole files into context.",
-    "Use `read_repo_file` only as a last resort after `run_repo_command` has identified an exact file and the full file text is necessary. Do not spend repo-tool budget on broad full-file exploration.",
+    "When you need repository context, start with `run_repo_command`. It runs against a full checkout of the PR head in a persistent sandbox, so use it to search and inspect files directly instead of listing a path and then loading files through GitHub API.",
+    "Prefer sandbox commands that return small snippets: `rg -n -C 4 \"symbol\" path/`, `head -n 120 path/to/file`, `tail -n 80 path/to/file`, or `grep -n \"\" path/to/file`. These are faster and cheaper than full-file reads.",
+    "Use `read_repo_file` only as a last resort after sandbox commands prove that full file text is necessary for a concrete finding. Do not spend repo-tool budget on broad full-file exploration.",
     "If dependency manifests or lockfiles changed, call `dependency_review` to check added/removed packages and known vulnerabilities before commenting on dependency risk.",
     projectContext
       ? `\n## Project context — the project's own conventions/memory; honour these\n${projectContext}`
