@@ -56,10 +56,40 @@ Mimir reads the PR/diff and posts the review. Pick how it authenticates:
    - **Homepage URL:** anything (e.g. your repo URL).
    - **Webhook:** for a single repo, leave it **off** and keep the repo webhook from §2a. To
      review **many repos or other orgs**, turn the App webhook **on** instead — see §2c.
-   - **Repository permissions:** **Contents → Read-only**, **Pull requests → Read and write**
-     (leave everything else "No access").
-   - **Where can this app be installed:** "Only on this account".
+   - **Repository permissions** and **Subscribe to events:** set them per the two tables below.
+     **Order matters** — set the permissions first, or the events you need won't appear.
+   - **Where can this app be installed:** **Only on this account** (single owner). Pick **Any
+     account** only for multiple orgs — then you **must** set `ALLOWED_OWNERS` (see §2c ⚠️).
    - **Create GitHub App.**
+
+   **Repository permissions** — leave everything not listed at **No access**:
+
+   | Permission        | Access             | Why                                                                                                                               | When            |
+   | ----------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+   | **Metadata**      | Read-only          | Mandatory for every App; GitHub pre-selects it — leave it.                                                                        | always (auto)   |
+   | **Pull requests** | **Read and write** | Read the PR + diff; post the summary and inline comments. Read-only ⇒ review runs but posting `403`s and **nothing appears**.     | always          |
+   | **Contents**      | Read-only          | Read the diff, changed files, and project tree from the base branch.                                                              | always          |
+   | **Contents** ⬆    | **Read and write** | _Raise Contents to write_ so `/remember` and `/feedback` can commit memory to `.mimir/memory/*.md`.                               | for memory      |
+   | **Issues**        | Read-only          | **Only to unlock the "Issue comment" event** below — the App reads the comment to parse a command; it never posts issue comments. | for PR commands |
+
+   **Subscribe to events:**
+
+   | Event             | Why                                                                      | When            |
+   | ----------------- | ------------------------------------------------------------------------ | --------------- |
+   | **Pull request**  | Auto-review when a PR is opened, reopened, or pushed to (synchronized).  | always          |
+   | **Issue comment** | PR-comment commands: `/review`, `/remember`, `/feedback`, `@<handle> …`. | for PR commands |
+
+   > ⚠️ **The events list is filtered by the permissions you picked.** GitHub only offers an
+   > event when a matching permission is set — so **"Issue comment" does not appear until you add
+   > `Issues: Read-only`**. It's gated by the **Issues** permission, _not_ Pull requests. Set the
+   > permission first; the checkbox then shows up. (Editing permissions later sends each
+   > installation a "review new permissions" request the owner must approve before they take
+   > effect.)
+
+   **Minimal vs full:** auto-review only → **Pull requests: write** + **Contents: read** + event
+   **Pull request**. For the `/remember` · `/feedback` · `/review` commands and memory writes, also
+   add **Contents: write**, **Issues: read**, and event **Issue comment**.
+
 2. On the App page, copy the **App ID** (near the top) → this is `GITHUB_APP_ID`.
 3. Scroll to **Private keys → Generate a private key**. A `.pem` downloads — it is the App's
    credential, keep it safe.
@@ -95,7 +125,8 @@ and Mimir authenticates as the correct installation for each event automatically
 1. **App webhook (once):** App settings → **General**:
    - **Webhook → Active:** on. **Webhook URL:** your `…/channels/github/webhook`.
      **Webhook secret:** the same `GITHUB_WEBHOOK_SECRET`.
-   - **Permissions & events → Subscribe to events:** **Pull request** + **Issue comment**.
+   - **Permissions & events → Subscribe to events:** **Pull request** (add **Issue comment** for
+     commands — remember it needs the **Issues** permission first; see the §2b tables).
    - Remove any per-repo webhook from §2a so events aren't delivered twice.
 2. **Add a repo:** App → **Install App → Configure** → add it under **Repository access** (same
    account), or **Install** the App on another account/org. No secret change, no redeploy.
