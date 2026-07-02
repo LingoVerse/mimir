@@ -1,14 +1,16 @@
 # Deploying Mimir
 
-Mimir is a small Node service (one Docker image) that receives GitHub webhooks and posts PR
-reviews. This covers the GitHub setup — the part that's easy to get wrong — and the deploy.
+Mimir receives GitHub webhooks and posts PR reviews. It deploys to **Docker/Node**
+(recommended) or **Cloudflare Workers**. This covers the GitHub setup — the part that's easy
+to get wrong — and both deploy paths.
 
 ## 1. Prerequisites
 
-- A Docker host reachable over **HTTPS** (Dokploy, Fly, Railway, or any VM with a
-  reverse proxy + TLS).
+- A deploy target: a **Docker** host over HTTPS (Dokploy, Fly, Railway, or any VM with TLS),
+  **or** a **Cloudflare** account with the **Workers Paid plan** (Durable Objects).
 - An **OpenRouter** API key — <https://openrouter.ai/keys>.
-- Admin on the GitHub repo or org you want reviewed.
+- Admin on the GitHub repo/org to review, and a token with **`Pull requests: Read and write`**
+  (§2b — this is the usual thing people get wrong).
 
 ## 2. GitHub setup
 
@@ -25,32 +27,32 @@ GitHub webhook config and the app's `GITHUB_WEBHOOK_SECRET`.
    - **Payload URL:** `https://<your-host>/channels/github/webhook`
    - **Content type:** `application/json` ← required (form-encoded is rejected with `415`)
    - **Secret:** the value from step 1
-   - **Which events:** "Let me select individual events" → **Pull requests**
-     (optionally **Issue comments** / **Pull request review comments** for future `/review`
-     re-triggers)
+   - **Which events:** "Let me select individual events" → **Pull requests** **+ Issue comments**
+     (Issue comments powers the `/review`, `/remember`, and `/feedback` PR commands)
    - **Active:** ✓
 3. Set the same value as `GITHUB_WEBHOOK_SECRET` on the app.
 
 After deploy, GitHub sends a **ping** — confirm **Recent Deliveries** shows `200`.
 
-### 2b. `GITHUB_TOKEN` — what rights it needs
+### 2b. `GITHUB_TOKEN` — required permissions
 
-Used for outbound calls: read the PR and its changed files, and post the summary + inline
-comments. The token's account is **who appears as the comment author** — use a dedicated bot
-account if you want "Mimir" as the author. Pick one:
+Mimir uses this token to **read** the PR/diff and **post** the review. Its account is who
+appears as the comment author (use a dedicated bot account for a "Mimir" author).
 
-- **Fine-grained PAT** (recommended) — <https://github.com/settings/tokens?type=beta>
-  - Repository access: the repos to review
-  - Permissions:
-    - **Contents:** Read-only
-    - **Pull requests:** Read and write
-    - _(Metadata: Read-only — granted automatically)_
-- **Classic PAT** — <https://github.com/settings/tokens>
-  - Scope **`repo`** (private repos) or **`public_repo`** (public only)
-- **GitHub App** (best for orgs / many repos)
-  - Permissions: **Contents: Read**, **Pull requests: Read & write**; subscribe to
-    **Pull request** events
-  - Use an **installation access token** as `GITHUB_TOKEN`
+> ⚠️ **`Pull requests` must be `Read and write`.** With read-only the review still runs, but
+> posting fails with `403 Resource not accessible by personal access token` and **no comment
+> appears** — the most common setup mistake.
+
+Pick one:
+
+| Type                               | Where                                          | Grant                                                                                                                            |
+| ---------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Fine-grained PAT** (recommended) | <https://github.com/settings/tokens?type=beta> | Repository access = the repo(s) to review · **Contents: Read** · **Pull requests: Read and write** (Metadata: Read is automatic) |
+| **Classic PAT**                    | <https://github.com/settings/tokens>           | scope **`repo`** (private) or **`public_repo`** (public)                                                                         |
+| **GitHub App** (orgs / many repos) | —                                              | **Contents: Read**, **Pull requests: Read & write**; subscribe to **Pull request** events; use an **installation access token**  |
+
+Editing a fine-grained PAT's permissions keeps the **same token value**, so you don't need to
+re-set the `GITHUB_TOKEN` secret afterward — the new rights take effect immediately.
 
 ## 3. Environment
 
@@ -157,9 +159,12 @@ Your webhook **Payload URL** is then
 
 ## Troubleshooting
 
-| Symptom                             | Cause / fix                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------ |
-| Boot fails: `Invalid environment …` | a required var is missing/empty — the message lists which                            |
-| Webhook `401`                       | secret mismatch between GitHub and `GITHUB_WEBHOOK_SECRET`                           |
-| Webhook `415`                       | content type isn't `application/json`                                                |
-| No comments / `403` from GitHub     | `GITHUB_TOKEN` lacks **Pull requests: write** (or `repo`), or no access to that repo |
+| Symptom                                              | Cause / fix                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Boot / deploy fails: `Invalid environment …`         | a required secret is missing — the message lists which. On Cloudflare, set secrets **before** `deploy:cf` (the upload runs a startup check) |
+| Webhook `401`                                        | secret mismatch between GitHub and `GITHUB_WEBHOOK_SECRET`                                                                                  |
+| Webhook `415`                                        | content type isn't `application/json`                                                                                                       |
+| Webhook `200` but no comment appears (`403` in logs) | `GITHUB_TOKEN` has **Pull requests read-only** — set it to **Read and write** (§2b), or it has no access to that repo                       |
+
+**See live logs** to diagnose a review that runs but posts nothing: Docker → container stdout;
+Cloudflare → `bunx wrangler tail mimir`.
