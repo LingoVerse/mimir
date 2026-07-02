@@ -86,9 +86,19 @@ export const runRepoSandboxCommand: RepoSandboxRunner = async ({
     await writeFile(archivePath, archive);
     await execFileAsync(
       "tar",
-      ["--no-same-owner", "-xzf", archivePath, "-C", checkoutPath, "--strip-components", "1"],
+      [
+        "--no-same-owner",
+        "--no-same-permissions",
+        "-xzf",
+        archivePath,
+        "-C",
+        checkoutPath,
+        "--strip-components",
+        "1",
+      ],
       { timeout: 30_000 },
     );
+    await execFileAsync("find", [checkoutPath, "-type", "l", "-delete"], { timeout: 30_000 });
     await writeFile(markerPath, checkoutKey);
   }
 

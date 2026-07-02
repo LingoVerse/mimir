@@ -67,9 +67,17 @@ test("isSafeSandboxCommand rejects shell control operators", () => {
 });
 
 test("isSafeSandboxCommand rejects rg's pre-processor flags", () => {
+  assert.equal(isSafeSandboxCommand("rg --pre sh foo"), false);
   assert.equal(isSafeSandboxCommand("rg --pre=sh foo"), false);
   assert.equal(isSafeSandboxCommand("rg --pre-glob='*.ts' foo"), false);
   assert.equal(isSafeSandboxCommand('rg "createUser" src'), true);
+});
+
+test("isSafeSandboxCommand rejects absolute and parent paths", () => {
+  assert.equal(isSafeSandboxCommand("grep token /proc/self/environ"), false);
+  assert.equal(isSafeSandboxCommand("rg token ../secrets"), false);
+  assert.equal(isSafeSandboxCommand("rg token src/../secrets"), false);
+  assert.equal(isSafeSandboxCommand("rg token ./src"), true);
 });
 
 test("isSafeSandboxCommand rejects find's exec/write primaries", () => {
@@ -78,6 +86,7 @@ test("isSafeSandboxCommand rejects find's exec/write primaries", () => {
   assert.equal(isSafeSandboxCommand("find . -ok rm {} +"), false);
   assert.equal(isSafeSandboxCommand("find . -delete"), false);
   assert.equal(isSafeSandboxCommand("find . -fprint /tmp/out"), false);
+  assert.equal(isSafeSandboxCommand("find . -fprint0 out"), false);
   assert.equal(isSafeSandboxCommand("find . -name '*.ts'"), true);
 });
 
