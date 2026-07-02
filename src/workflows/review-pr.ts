@@ -1,7 +1,7 @@
 import { type ActionContext, defineAgent, defineWorkflow } from "@flue/runtime";
 import { fetchPrDiff } from "../lib/diff.ts";
 import { decideEscalation } from "../lib/escalation.ts";
-import { client } from "../lib/github.ts";
+import { githubClient } from "../lib/github.ts";
 import { fetchIgnoreMatcher } from "../lib/ignore.ts";
 import { ReviewPayloadSchema, buildInstruction } from "../lib/instruction.ts";
 import { getReviewRunStore } from "../lib/dedup.ts";
@@ -32,15 +32,20 @@ const reviewer = defineAgent(() => ({
 }));
 
 async function run({ harness, log, input: payload }: ActionContext<typeof ReviewPayloadSchema>) {
+  // GitHub App: authenticate as the installation from the webhook payload so all
+  // outbound calls (diff, context, repo tools, posting) act as the correct org's
+  // bot. PAT auth / missing id fall back inside githubClient().
+  const gh = githubClient(payload.installationId);
+
   // 1. Fetch the diff + the project's own conventions/memory (from the base ref).
   //    `.mimirignore` (read from the trusted base ref) drops project-declared
   //    generated paths from the diff before review.
-  const ignore = await fetchIgnoreMatcher(client, {
+  const ignore = await fetchIgnoreMatcher(gh, {
     owner: payload.owner,
     repo: payload.repo,
     ref: payload.baseRef,
   });
-  const diff = await fetchPrDiff(client, payload, { ignore });
+  const diff = await fetchPrDiff(gh, payload, { ignore });
   const filenames = diff.files.map((f) => f.filename);
   const securitySensitive = touchesSensitivePath(filenames);
   const sensitiveFiles = listSensitiveFiles(filenames);
@@ -51,16 +56,16 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
   // built lazily below, only when we actually escalate.
   const toolRef = { owner: payload.owner, repo: payload.repo, ref: payload.headSha };
 
-  const projectContext = await fetchProjectContext(client, {
+  const projectContext = await fetchProjectContext(gh, {
     owner: payload.owner,
     repo: payload.repo,
     ref: payload.baseRef,
   });
-  const projectTree = await fetchProjectTree(client, toolRef);
+  const projectTree = await fetchProjectTree(gh, toolRef);
   const instruction = buildInstruction(payload, diff, securitySensitive, projectContext, {
     projectTree,
   });
-  const tools = repoContextTools(client, toolRef, diff.files.length);
+  const tools = repoContextTools(gh, toolRef, diff.files.length);
 
   // 2. Primary pass on MODEL_PRIMARY.
   const session = await harness.session();
@@ -110,7 +115,7 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
       escalationSession.prompt(escalationInstruction, {
         result: ReviewResultSchema,
         model: ESCALATION_MODEL,
-        tools: repoContextTools(client, toolRef, diff.files.length),
+        tools: repoContextTools(gh, toolRef, diff.files.length),
       }),
     );
     review = escalationResult.data;
@@ -125,12 +130,17 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
     escalationModel: escalationResult?.model.id ?? null,
     escalationUsd: escalationResult?.usage.cost.total ?? null,
   };
-  const posted = await postReview(payload, review, {
-    escalated: decision.escalate,
-    reasons: decision.reasons,
-    truncatedOmitted: diff.truncated?.omitted.length,
-    cost,
-  });
+  const posted = await postReview(
+    payload,
+    review,
+    {
+      escalated: decision.escalate,
+      reasons: decision.reasons,
+      truncatedOmitted: diff.truncated?.omitted.length,
+      cost,
+    },
+    gh,
+  );
   logEvent(log, "review cost", {
     primaryModel: primaryResult.model.id,
     primaryInputTokens: primaryResult.usage.input,

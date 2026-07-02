@@ -11,6 +11,9 @@ export const ReviewPayloadSchema = v.object({
   headSha: v.string(),
   // Base branch — project context (conventions/memory) is read from here (trusted).
   baseRef: v.string(),
+  // GitHub App installation id (from the webhook payload) so the workflow can
+  // authenticate as the right installation for cross-org support. Absent for PAT.
+  installationId: v.optional(v.number()),
 });
 export type ReviewPayload = v.InferOutput<typeof ReviewPayloadSchema>;
 

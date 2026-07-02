@@ -46,16 +46,16 @@ Mimir reads the PR/diff and posts the review. Pick how it authenticates:
 > ⚠️ Either way, **`Pull requests` must be `Read and write`.** With read-only the review runs
 > but posting silently `403`s and **no comment appears** — the most common setup mistake.
 
-**Set up the GitHub App** — one-time, ~5 minutes. Produces three values:
-`GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY`.
+**Set up the GitHub App** — one-time, ~5 minutes. Produces `GITHUB_APP_ID` and
+`GITHUB_APP_PRIVATE_KEY` (required), plus an **optional** `GITHUB_APP_INSTALLATION_ID` fallback
+(with the App webhook in §2c the installation is read from each event, so it isn't needed).
 
 1. **Create the App:** <https://github.com/settings/apps> → **New GitHub App**.
    - **GitHub App name:** what shows as the reviewer, e.g. `mimir-reviewer` (globally unique;
      becomes the `<name>[bot]` login).
    - **Homepage URL:** anything (e.g. your repo URL).
-   - **Webhook → Active:** **uncheck it.** Events are already delivered by the repo webhook
-     from §2a; the App is used only for the bot identity + write access. _(Advanced: instead
-     point the App webhook at the same URL + secret and drop the repo webhook.)_
+   - **Webhook:** for a single repo, leave it **off** and keep the repo webhook from §2a. To
+     review **many repos or other orgs**, turn the App webhook **on** instead — see §2c.
    - **Repository permissions:** **Contents → Read-only**, **Pull requests → Read and write**
      (leave everything else "No access").
    - **Where can this app be installed:** "Only on this account".
@@ -64,10 +64,11 @@ Mimir reads the PR/diff and posts the review. Pick how it authenticates:
 3. Scroll to **Private keys → Generate a private key**. A `.pem` downloads — it is the App's
    credential, keep it safe.
 4. Left sidebar **Install App → Install** on your account/org → **Only select repositories** →
-   pick the repo(s) to review → **Install**. The resulting URL is
-   `…/settings/installations/<NUMBER>` — that `<NUMBER>` is `GITHUB_APP_INSTALLATION_ID`.
-5. Give the three values to Mimir as env/secrets (§3 Docker, or §4 Cloudflare
-   `wrangler secret put`). For the private key, see the note below.
+   pick the repo(s) to review → **Install**. _(The install URL `…/settings/installations/<NUMBER>`
+   gives `GITHUB_APP_INSTALLATION_ID` — set it as the optional fallback; with the App webhook
+   in §2c it is resolved per event and can be omitted.)_
+5. Give the values to Mimir as env/secrets (§3 Docker, or §4 Cloudflare `wrangler secret put`).
+   For the private key, see the note below.
 
 > 🔑 **Private-key format on Cloudflare.** GitHub issues the key as PKCS#1
 > (`-----BEGIN RSA PRIVATE KEY-----`); Workers' Web Crypto wants PKCS#8. Convert once, then
@@ -84,6 +85,24 @@ Mimir reads the PR/diff and posts the review. Pick how it authenticates:
 > 🔁 **Migrating an existing PR from PAT to App.** A summary comment first created by a PAT
 > keeps its original author when the App later _updates_ it. Delete that one comment — the next
 > review recreates it as `<name>[bot]`. New PRs are bot-authored from the start.
+
+### 2c. Reviewing multiple repos or orgs (GitHub App)
+
+With a GitHub App you don't wire a webhook per repo. Configure the **App's own webhook once**
+and it delivers events for **every** repo the App is installed on — across accounts and orgs —
+and Mimir authenticates as the correct installation for each event automatically.
+
+1. **App webhook (once):** App settings → **General**:
+   - **Webhook → Active:** on. **Webhook URL:** your `…/channels/github/webhook`.
+     **Webhook secret:** the same `GITHUB_WEBHOOK_SECRET`.
+   - **Permissions & events → Subscribe to events:** **Pull request** + **Issue comment**.
+   - Remove any per-repo webhook from §2a so events aren't delivered twice.
+2. **Add a repo:** App → **Install App → Configure** → add it under **Repository access** (same
+   account), or **Install** the App on another account/org. No secret change, no redeploy.
+
+Cross-org works because Mimir reads `installation.id` from each webhook payload and mints a
+token for that installation. `GITHUB_APP_INSTALLATION_ID` is only a fallback (used when a
+payload carries no installation, e.g. a plain repo webhook).
 
 **Personal access token** (simpler; comments authored by you):
 

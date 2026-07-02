@@ -59,14 +59,13 @@ export function validateEnv(source: Record<string, string | undefined> = process
   // GitHub auth must be exactly one of: a PAT, or the full GitHub App trio.
   const env = result.output;
   const hasPat = Boolean(env.GITHUB_TOKEN);
-  const hasApp = Boolean(
-    env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY && env.GITHUB_APP_INSTALLATION_ID,
-  );
+  // App mode needs the app id + private key; the installation id comes from each
+  // webhook payload (GITHUB_APP_INSTALLATION_ID is only an optional fallback).
+  const hasApp = Boolean(env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY);
   if (!hasPat && !hasApp) {
     throw new Error(
       "Invalid environment — GitHub auth not configured: set GITHUB_TOKEN (personal access " +
-        "token), or all of GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID " +
-        "(GitHub App).\n\nSee DEPLOY.md.",
+        "token), or GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY (GitHub App).\n\nSee DEPLOY.md.",
     );
   }
   return env;

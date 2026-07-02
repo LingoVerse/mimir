@@ -1,5 +1,5 @@
+import type { Octokit } from "@octokit/rest";
 import { type SummaryCommentStore, getSummaryCommentStore } from "./dedup.ts";
-import { client } from "./github.ts";
 import type { Finding, ReviewResult, Severity } from "./review.ts";
 
 // PR coordinates needed to post. `headSha` is the commit inline comments attach to.
@@ -131,7 +131,7 @@ export async function postReview(
   target: ReviewTarget,
   review: ReviewResult,
   meta: PostMeta,
-  injectedClient = client,
+  injectedClient: Octokit,
   injectedStore: SummaryCommentStore = getSummaryCommentStore(),
 ): Promise<PostResult> {
   const { owner, repo, number } = target;

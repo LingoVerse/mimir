@@ -23,19 +23,18 @@ test("throws naming each missing required var", () => {
   );
 });
 
-test("accepts GitHub App auth instead of a PAT", () => {
+test("accepts GitHub App auth (id + key; installation id optional)", () => {
   assert.doesNotThrow(() =>
     validateEnv({
       OPENROUTER_API_KEY: "k",
       GITHUB_WEBHOOK_SECRET: "s",
       GITHUB_APP_ID: "123",
       GITHUB_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
-      GITHUB_APP_INSTALLATION_ID: "456",
     }),
   );
 });
 
-test("throws when neither PAT nor full App creds are configured", () => {
+test("throws when neither PAT nor App id+key are configured", () => {
   assert.throws(
     () =>
       validateEnv({ OPENROUTER_API_KEY: "k", GITHUB_WEBHOOK_SECRET: "s", GITHUB_APP_ID: "123" }),

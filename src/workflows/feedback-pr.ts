@@ -5,7 +5,7 @@
 
 import { type ActionContext, defineAgent, defineWorkflow } from "@flue/runtime";
 import * as v from "valibot";
-import { client } from "../lib/github.ts";
+import { githubClient } from "../lib/github.ts";
 import { logEvent } from "../lib/log.ts";
 import { MemoryEntrySchema, commitMemoryEntry } from "../lib/memory.ts";
 import memoryCurator from "../skills/memory-curator/SKILL.md" with { type: "skill" };
@@ -17,6 +17,8 @@ export const FeedbackPayloadSchema = v.object({
   headRef: v.string(),
   commentBody: v.string(),
   commentAuthor: v.string(),
+  // GitHub App installation id (webhook payload) for cross-org auth; absent for PAT.
+  installationId: v.optional(v.number()),
 });
 export type FeedbackPayload = v.InferOutput<typeof FeedbackPayloadSchema>;
 
@@ -54,7 +56,7 @@ Apply the memory-curator skill. Return JSON only.`;
   }
 
   const r = await commitMemoryEntry(
-    client,
+    githubClient(payload.installationId),
     { owner: payload.owner, repo: payload.repo, headRef: payload.headRef },
     { ...entry, source: `pr#${payload.prNumber} by ${payload.commentAuthor}` },
   );
