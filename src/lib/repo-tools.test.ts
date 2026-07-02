@@ -66,6 +66,27 @@ test("isSafeSandboxCommand rejects shell control operators", () => {
   assert.equal(isSafeSandboxCommand("rg foo | wc -l"), false);
 });
 
+test("isSafeSandboxCommand rejects find's exec/write primaries", () => {
+  assert.equal(isSafeSandboxCommand("find . -exec id +"), false);
+  assert.equal(isSafeSandboxCommand("find . -execdir id {} +"), false);
+  assert.equal(isSafeSandboxCommand("find . -ok rm {} +"), false);
+  assert.equal(isSafeSandboxCommand("find . -delete"), false);
+  assert.equal(isSafeSandboxCommand("find . -fprint /tmp/out"), false);
+  assert.equal(isSafeSandboxCommand("find . -name '*.ts'"), true);
+});
+
+test("isSafeSandboxCommand treats sed as an exec-gated command, not read-only", () => {
+  assert.equal(isSafeSandboxCommand("sed 's/foo/bar/' file"), false);
+  const original = process.env.REPO_SANDBOX_ALLOW_EXEC;
+  process.env.REPO_SANDBOX_ALLOW_EXEC = "1";
+  try {
+    assert.equal(isSafeSandboxCommand("sed 's/foo/bar/' file"), true);
+  } finally {
+    if (original === undefined) delete process.env.REPO_SANDBOX_ALLOW_EXEC;
+    else process.env.REPO_SANDBOX_ALLOW_EXEC = original;
+  }
+});
+
 function makeClient(handler: () => unknown, getTreeHandler?: () => unknown) {
   return {
     rest: {
