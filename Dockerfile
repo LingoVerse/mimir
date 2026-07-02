@@ -28,6 +28,17 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
     DATABASE_URL=sqlite:/data/mimir.db
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    coreutils \
+    findutils \
+    gawk \
+    grep \
+    jq \
+    ripgrep \
+    sed \
+    tar \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

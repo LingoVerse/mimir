@@ -1,5 +1,6 @@
 import { type ToolDefinition, defineTool } from "@flue/runtime";
 import type { Octokit } from "@octokit/rest";
+import { repoSandboxNeedsArchive, runRepoSandboxCommand } from "#repo-sandbox";
 import * as v from "valibot";
 
 export interface RepoRef {
@@ -10,8 +11,40 @@ export interface RepoRef {
 
 const MAX_FILE_CHARS = 20_000;
 const MAX_SEARCH_RESULTS = 15;
+const MAX_COMMAND_OUTPUT_CHARS = 20_000;
 const MIN_TOOL_BUDGET = 8;
 const MAX_TOOL_BUDGET = 40;
+
+const READ_ONLY_COMMANDS = new Set([
+  "awk",
+  "find",
+  "grep",
+  "jq",
+  "ls",
+  "rg",
+  "sed",
+  "wc",
+]);
+const EXEC_COMMANDS = new Set([
+  "bun",
+  "cargo",
+  "deno",
+  "go",
+  "node",
+  "npm",
+  "pnpm",
+  "pytest",
+  "yarn",
+]);
+
+export interface RepoToolOptions {
+  sandboxId?: string;
+  baseRef?: string;
+}
+
+export function repoSandboxId(owner: string, repo: string, prNumber: number): string {
+  return `${owner}/${repo}#${prNumber}`;
+}
 
 // Per-pass repo-tool-call budget. An explicit REPO_TOOL_CALL_BUDGET pins it (escape
 // hatch / tests); otherwise it scales with the reviewed-file count — roughly one
@@ -36,6 +69,66 @@ function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function commandName(command: string): string | null {
+  const trimmed = command.trim();
+  if (!trimmed) return null;
+  const match = /^[A-Za-z0-9_./-]+/.exec(trimmed);
+  if (!match) return null;
+  return match[0].split("/").pop() ?? null;
+}
+
+export function isSafeSandboxCommand(command: string): boolean {
+  if (/[;&|><`$()\\\n\r]/.test(command)) return false;
+  const name = commandName(command);
+  if (!name) return false;
+  if (READ_ONLY_COMMANDS.has(name)) return true;
+  return process.env.REPO_SANDBOX_ALLOW_EXEC === "1" && EXEC_COMMANDS.has(name);
+}
+
+function truncateOutput(text: string): string {
+  return text.length > MAX_COMMAND_OUTPUT_CHARS
+    ? `${text.slice(0, MAX_COMMAND_OUTPUT_CHARS)}\n... [truncated ${text.length - MAX_COMMAND_OUTPUT_CHARS} chars]`
+    : text;
+}
+
+function tarballBuffer(data: unknown): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof ArrayBuffer) return Buffer.from(data);
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  if (typeof data === "string") return Buffer.from(data, "binary");
+  throw new Error(`Unsupported tarball response: ${typeof data}`);
+}
+
+function formatDependencyReview(data: unknown): string {
+  if (!Array.isArray(data)) return "Dependency review returned an unexpected response.";
+  if (data.length === 0) return "No dependency changes detected.";
+  const lines = data.slice(0, MAX_SEARCH_RESULTS).map((item) => {
+    const dep = item as Record<string, unknown>;
+    const vulns = Array.isArray(dep.vulnerabilities) ? dep.vulnerabilities : [];
+    const vulnText = vulns.length
+      ? ` vulnerabilities=${vulns
+          .map((v) => {
+            const vuln = v as Record<string, unknown>;
+            return `${String(vuln.severity ?? "unknown")}:${String(vuln.advisory_ghsa_id ?? "?")}`;
+          })
+          .join(",")}`
+      : "";
+    return [
+      String(dep.change_type ?? "changed"),
+      String(dep.ecosystem ?? "unknown"),
+      String(dep.name ?? "unknown"),
+      String(dep.version ?? "unknown"),
+      `manifest=${String(dep.manifest ?? "unknown")}`,
+      `scope=${String(dep.scope ?? "unknown")}`,
+      vulnText,
+    ]
+      .filter(Boolean)
+      .join(" ");
+  });
+  if (data.length > MAX_SEARCH_RESULTS) lines.push(`... [${data.length - MAX_SEARCH_RESULTS} more]`);
+  return lines.join("\n");
+}
+
 // Read-only tools scoped to one repo + ref, so the reviewer can pull context the
 // diff doesn't show (callers, schemas, related modules). The scope is fixed by
 // the closure — tool parameters only choose paths/queries, never the repo/ref
@@ -44,11 +137,13 @@ export function repoContextTools(
   client: Octokit,
   { owner, repo, ref }: RepoRef,
   fileCount = 0,
+  options: RepoToolOptions = {},
 ): ToolDefinition[] {
   const budget = resolveToolBudget(fileCount);
   let callCount = 0;
   // Cached tree entries for search_repo (fetched once from the head ref).
   let repoTree: string[] | null = null;
+  const sandboxId = options.sandboxId ?? `${owner}-${repo}-${ref}`;
 
   function guardedExecute(
     toolName: string,
@@ -150,5 +245,82 @@ export function repoContextTools(
     },
   });
 
-  return [readRepoFile, listRepoDir, searchRepo];
+  const runRepoCommand = defineTool({
+    name: "run_repo_command",
+    description:
+      "Run a bounded shell command in a persistent sandbox checkout of the PR head ref. Prefer rg/grep/sed/jq/find for targeted code review context. The checkout is reused until the PR closes or local TTL cleanup removes it. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
+    input: v.object({
+      command: v.pipe(
+        v.string(),
+        v.description('Command to run from repo root, e.g. rg "createUser" src'),
+      ),
+      timeoutMs: v.optional(
+        v.pipe(v.number(), v.description("Timeout in milliseconds, capped at 60000")),
+      ),
+    }),
+    run: async ({ input: { command, timeoutMs } }) => {
+      if (!isSafeSandboxCommand(command)) {
+        return (
+          `Command not allowed: ${commandName(command) ?? "<empty>"}. ` +
+          "Allowed by default: awk, find, grep, jq, ls, rg, sed, wc. " +
+          "Shell control operators are blocked. Set REPO_SANDBOX_ALLOW_EXEC=1 for build/test commands."
+        );
+      }
+
+      return guardedExecute("run_repo_command", command, async () => {
+        try {
+          let archive: Uint8Array | undefined;
+          if (await repoSandboxNeedsArchive({ checkoutKey: ref, sandboxId })) {
+            const { data } = await client.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
+              owner,
+              repo,
+              ref,
+            });
+            archive = tarballBuffer(data);
+          }
+          const boundedTimeout = Math.max(1_000, Math.min(timeoutMs ?? 15_000, 60_000));
+          const result = await runRepoSandboxCommand({
+            archive,
+            checkoutKey: ref,
+            command,
+            timeoutMs: boundedTimeout,
+            maxOutputChars: MAX_COMMAND_OUTPUT_CHARS,
+            sandboxId,
+          });
+          return truncateOutput(result.output);
+        } catch (err) {
+          return `Command failed: ${errMessage(err)}`;
+        }
+      });
+    },
+  });
+
+  const tools: ToolDefinition[] = [readRepoFile, listRepoDir, searchRepo, runRepoCommand];
+
+  if (options.baseRef) {
+    tools.push(
+      defineTool({
+        name: "dependency_review",
+        description:
+          "Summarize dependency changes and known vulnerabilities between the PR base ref and head ref using GitHub Dependency Graph. Use when manifests or lockfiles changed.",
+        input: v.object({}),
+        run: async () => {
+          const basehead = `${options.baseRef}...${ref}`;
+          return guardedExecute("dependency_review", basehead, async () => {
+            try {
+              const { data } = await client.request(
+                "GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}",
+                { owner, repo, basehead },
+              );
+              return formatDependencyReview(data);
+            } catch (err) {
+              return `Dependency review unavailable: ${errMessage(err)}`;
+            }
+          });
+        },
+      }),
+    );
+  }
+
+  return tools;
 }

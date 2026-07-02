@@ -8,7 +8,7 @@ import { getReviewRunStore } from "../lib/dedup.ts";
 import { logEvent } from "../lib/log.ts";
 import { postReview } from "../lib/post-review.ts";
 import { fetchProjectContext, fetchProjectTree } from "../lib/project-context.ts";
-import { repoContextTools } from "../lib/repo-tools.ts";
+import { repoContextTools, repoSandboxId } from "../lib/repo-tools.ts";
 import { withRetry } from "../lib/retry.ts";
 import { ReviewResultSchema } from "../lib/review.ts";
 import { listSensitiveFiles, touchesSensitivePath } from "../lib/security-paths.ts";
@@ -55,6 +55,10 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
   // pass starve the escalation pass of context reads. The escalation tools are
   // built lazily below, only when we actually escalate.
   const toolRef = { owner: payload.owner, repo: payload.repo, ref: payload.headSha };
+  const sandboxOptions = {
+    sandboxId: repoSandboxId(payload.owner, payload.repo, payload.number),
+    baseRef: payload.baseRef,
+  };
 
   const projectContext = await fetchProjectContext(gh, {
     owner: payload.owner,
@@ -65,7 +69,7 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
   const instruction = buildInstruction(payload, diff, securitySensitive, projectContext, {
     projectTree,
   });
-  const tools = repoContextTools(gh, toolRef, diff.files.length);
+  const tools = repoContextTools(gh, toolRef, diff.files.length, sandboxOptions);
 
   // 2. Primary pass on MODEL_PRIMARY.
   const session = await harness.session();
@@ -115,7 +119,7 @@ async function run({ harness, log, input: payload }: ActionContext<typeof Review
       escalationSession.prompt(escalationInstruction, {
         result: ReviewResultSchema,
         model: ESCALATION_MODEL,
-        tools: repoContextTools(gh, toolRef, diff.files.length),
+        tools: repoContextTools(gh, toolRef, diff.files.length, sandboxOptions),
       }),
     );
     review = escalationResult.data;

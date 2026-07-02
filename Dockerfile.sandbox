@@ -1,0 +1,16 @@
+FROM docker.io/cloudflare/sandbox:0.12.3
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    coreutils \
+    findutils \
+    gawk \
+    git \
+    grep \
+    jq \
+    ripgrep \
+    sed \
+    tar \
+  && rm -rf /var/lib/apt/lists/*
+
+EXPOSE 8080
