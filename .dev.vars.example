@@ -15,8 +15,13 @@ ESCALATE_SECURITY_ALWAYS="true"
 
 # --- GitHub ---
 GITHUB_WEBHOOK_SECRET=""                                   # REQUIRED — openssl rand -hex 32
-GITHUB_TOKEN=""                                            # REQUIRED — read diff + post comments
 MIMIR_HANDLE="mimir"
+# GitHub auth — set EITHER a PAT (comments authored by you) …
+GITHUB_TOKEN=""                                            # PAT: Pull requests Read+write (DEPLOY.md §2b)
+# … OR a GitHub App (comments authored by <AppName>[bot]); leave GITHUB_TOKEN empty then:
+# GITHUB_APP_ID=""
+# GITHUB_APP_PRIVATE_KEY=""                                # full .pem contents
+# GITHUB_APP_INSTALLATION_ID=""
 
 # --- Behavior ---
 POST_NITS="false"

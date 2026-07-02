@@ -34,25 +34,38 @@ GitHub webhook config and the app's `GITHUB_WEBHOOK_SECRET`.
 
 After deploy, GitHub sends a **ping** — confirm **Recent Deliveries** shows `200`.
 
-### 2b. `GITHUB_TOKEN` — required permissions
+### 2b. GitHub auth — App (recommended) or PAT
 
-Mimir uses this token to **read** the PR/diff and **post** the review. Its account is who
-appears as the comment author (use a dedicated bot account for a "Mimir" author).
+Mimir reads the PR/diff and posts the review. Pick how it authenticates:
 
-> ⚠️ **`Pull requests` must be `Read and write`.** With read-only the review still runs, but
-> posting fails with `403 Resource not accessible by personal access token` and **no comment
-> appears** — the most common setup mistake.
+- **GitHub App** — comments are authored by **`<AppName>[bot]`** with the bot badge, clearly
+  not a person. Set `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` + `GITHUB_APP_INSTALLATION_ID`
+  (installation tokens are minted/refreshed automatically).
+- **Personal access token** — comments are authored by the token's user. Set `GITHUB_TOKEN`.
 
-Pick one:
+> ⚠️ Either way, **`Pull requests` must be `Read and write`.** With read-only the review runs
+> but posting silently `403`s and **no comment appears** — the most common setup mistake.
 
-| Type                               | Where                                          | Grant                                                                                                                            |
-| ---------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Fine-grained PAT** (recommended) | <https://github.com/settings/tokens?type=beta> | Repository access = the repo(s) to review · **Contents: Read** · **Pull requests: Read and write** (Metadata: Read is automatic) |
-| **Classic PAT**                    | <https://github.com/settings/tokens>           | scope **`repo`** (private) or **`public_repo`** (public)                                                                         |
-| **GitHub App** (orgs / many repos) | —                                              | **Contents: Read**, **Pull requests: Read & write**; subscribe to **Pull request** events; use an **installation access token**  |
+**GitHub App** (<https://github.com/settings/apps> → **New GitHub App**):
 
-Editing a fine-grained PAT's permissions keeps the **same token value**, so you don't need to
-re-set the `GITHUB_TOKEN` secret afterward — the new rights take effect immediately.
+1. **Repository permissions:** **Contents: Read-only**, **Pull requests: Read and write**.
+2. **Webhook:** leave it off and keep the repo webhook from §2a (it already delivers events) —
+   the App is used only for the bot identity + write access.
+3. Create → note the **App ID**; **Generate a private key** (downloads a `.pem`).
+4. **Install App** → select the repo(s). The install URL ends `…/installations/<ID>` — that
+   number is `GITHUB_APP_INSTALLATION_ID`.
+5. Secrets: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (full `.pem` contents),
+   `GITHUB_APP_INSTALLATION_ID`.
+
+**Personal access token** (simpler; comments authored by you):
+
+| Type                               | Where                                          | Grant                                                                              |
+| ---------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **Fine-grained PAT** (recommended) | <https://github.com/settings/tokens?type=beta> | Repo access = the repo(s) · **Contents: Read** · **Pull requests: Read and write** |
+| **Classic PAT**                    | <https://github.com/settings/tokens>           | scope **`repo`** (private) or **`public_repo`** (public)                           |
+
+Editing a fine-grained PAT's permissions keeps the **same token value** — no need to re-set the
+secret afterward.
 
 ## 3. Environment
 
@@ -60,7 +73,9 @@ Set env **on the container** (Dokploy's env UI, or compose `env_file`). The buil
 **not** read a `.env` file — env must be supplied at runtime. Mimir **validates env at boot and
 refuses to start** if a required var is missing or malformed (the error names which).
 
-- **Required:** `OPENROUTER_API_KEY`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_TOKEN`
+- **Required:** `OPENROUTER_API_KEY`, `GITHUB_WEBHOOK_SECRET`, and GitHub auth — either
+  `GITHUB_TOKEN` **or** the App trio `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` +
+  `GITHUB_APP_INSTALLATION_ID` (§2b)
 - **Optional:** `MODEL_PRIMARY`, `MODEL_ESCALATION`, `ESCALATION_DIFF_THRESHOLD`,
   `DIFF_MAX_TOKENS`, `POST_NITS`, `DATABASE_URL` (see the README table)
 
@@ -120,7 +135,12 @@ bun run d1:migrate            # remote (production D1)
 ```bash
 bunx wrangler secret put OPENROUTER_API_KEY
 bunx wrangler secret put GITHUB_WEBHOOK_SECRET
+# GitHub auth — a PAT:
 bunx wrangler secret put GITHUB_TOKEN
+# …or a GitHub App (bot identity, §2b):
+# bunx wrangler secret put GITHUB_APP_ID
+# bunx wrangler secret put GITHUB_APP_PRIVATE_KEY        # paste the full .pem contents
+# bunx wrangler secret put GITHUB_APP_INSTALLATION_ID
 # optional: MODEL_PRIMARY, MODEL_ESCALATION, POST_NITS, ADMIN_TOKEN, …
 ```
 
