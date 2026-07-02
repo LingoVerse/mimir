@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "imports": {
+    "#repo-sandbox": {
+      "workerd": "./src/lib/repo-sandbox.cloudflare.ts",
+      "default": "./src/lib/repo-sandbox.node.ts"
+    },
     "#app-store": {
       "workerd": "./src/lib/dedup.d1.ts",
       "default": "./src/lib/dedup.node.ts"
@@ -30,6 +34,7 @@
   "dependencies": {
     "@flue/github": "^1.0.0-beta.1",
     "@flue/runtime": "^1.0.0-beta.9",
+    "@cloudflare/sandbox": "^0.12.3",
     "@octokit/auth-app": "^8.2.0",
     "@octokit/rest": "^22.0.1",
     "valibot": "^1.4.2"

@@ -4,6 +4,7 @@ import { invoke } from "@flue/runtime";
 import { getDedupStore } from "../lib/dedup.ts";
 import { validateEnv } from "../lib/env.ts";
 import { githubClient } from "../lib/github.ts";
+import { destroyRepoSandbox } from "#repo-sandbox";
 import {
   hasSkipLabel,
   hasSkipMarker,
@@ -17,6 +18,7 @@ import feedbackPr, { type FeedbackPayload } from "../workflows/feedback-pr.ts";
 import rememberPr, { type RememberPayload } from "../workflows/remember-pr.ts";
 import reviewPr, { type ReviewPayload } from "../workflows/review-pr.ts";
 import { handlePullRequestDelivery } from "../lib/handle-delivery.ts";
+import { repoSandboxId } from "../lib/repo-tools.ts";
 
 // Fail fast at startup: Flue loads channels on boot (and for `flue run`), so a
 // missing secret surfaces here with a clear message instead of crashing
@@ -107,6 +109,18 @@ export const channel = createGitHubChannel({
     const installationId = (delivery.payload as { installation?: { id?: number } }).installation
       ?.id;
     const gh = githubClient(installationId);
+
+    if (delivery.name === "pull_request" && delivery.payload.action === "closed") {
+      const { repository, pull_request } = delivery.payload;
+      const sandboxId = repoSandboxId(repository.owner.login, repository.name, pull_request.number);
+      try {
+        await destroyRepoSandbox(sandboxId);
+        console.log("[mimir] repo sandbox destroyed", { sandboxId });
+      } catch (err) {
+        console.warn("[mimir] repo sandbox cleanup failed", { sandboxId, err: String(err) });
+      }
+      return;
+    }
 
     if (delivery.name === "pull_request" && REVIEW_ACTIONS.has(delivery.payload.action)) {
       // Opt-out lever: a skip label on the PR excludes it from review entirely

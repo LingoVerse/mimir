@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isSafeRepoPath, repoContextTools, resolveToolBudget } from "./repo-tools.ts";
+import {
+  isSafeRepoPath,
+  isSafeSandboxCommand,
+  repoContextTools,
+  resolveToolBudget,
+} from "./repo-tools.ts";
 
 test("resolveToolBudget scales with file count, floored and capped", () => {
   const fixed = process.env.REPO_TOOL_CALL_BUDGET;
@@ -32,13 +37,33 @@ test("isSafeRepoPath rejects absolute paths and traversal", () => {
   }
 });
 
-test("repoContextTools returns the three read-only tools", () => {
+test("repoContextTools returns the repo context tools", () => {
   // octokit client is unused until a tool executes; identity is enough here.
   const tools = repoContextTools({} as never, { owner: "o", repo: "r", ref: "sha" });
   assert.deepEqual(
     tools.map((t) => t.name),
-    ["read_repo_file", "list_repo_dir", "search_repo"],
+    ["read_repo_file", "list_repo_dir", "search_repo", "run_repo_command"],
   );
+});
+
+test("repoContextTools adds dependency_review when base ref is available", () => {
+  const tools = repoContextTools({} as never, { owner: "o", repo: "r", ref: "sha" }, 0, {
+    baseRef: "main",
+  });
+  assert.deepEqual(
+    tools.map((t) => t.name),
+    ["read_repo_file", "list_repo_dir", "search_repo", "run_repo_command", "dependency_review"],
+  );
+});
+
+test("isSafeSandboxCommand allows simple read-only commands", () => {
+  assert.equal(isSafeSandboxCommand('rg "createUser" src'), true);
+  assert.equal(isSafeSandboxCommand("jq . package.json"), true);
+});
+
+test("isSafeSandboxCommand rejects shell control operators", () => {
+  assert.equal(isSafeSandboxCommand("rg foo; rm -rf /"), false);
+  assert.equal(isSafeSandboxCommand("rg foo | wc -l"), false);
 });
 
 function makeClient(handler: () => unknown, getTreeHandler?: () => unknown) {

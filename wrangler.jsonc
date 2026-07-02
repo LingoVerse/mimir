@@ -11,6 +11,22 @@
     "MODEL_PRIMARY": "openrouter/deepseek/deepseek-v4-flash",
     "MODEL_ESCALATION": "openrouter/z-ai/glm-5.2"
   },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile.sandbox",
+      "instance_type": "lite",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox"
+      }
+    ]
+  },
   // Durable Object migrations for Flue's generated classes. FlueRegistry is
   // Flue-internal (run indexing); the others are one per discovered workflow.
   // Never rewrite/reorder a deployed migration entry — append a new tag instead.
@@ -23,6 +39,10 @@
         "FlueRememberPrWorkflow",
         "FlueFeedbackPrWorkflow"
       ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["Sandbox"]
     }
   ],
   // Application-owned storage (dedup, summary-comment ids, review stats). Create

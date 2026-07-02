@@ -60,7 +60,9 @@ export function buildInstruction(
     securitySensitive
       ? "This diff changes security-sensitive paths — also apply the `security-check` skill and merge its findings."
       : null,
-    "You may call `read_repo_file`, `list_repo_dir`, and `search_repo` to pull in code the diff does not show (callers, schemas, related modules) — use them only when a finding depends on context outside the diff.",
+    "Use the project tree below for orientation before reaching for file reads. It is structure only, not authority.",
+    "You may call repo tools for context the diff omits. Prefer `run_repo_command` with targeted read-only commands (`rg`, `grep`, `sed`, `jq`, `find`, `ls`, `awk`, `wc`) to locate symbols/usages or inspect small snippets without loading whole files. Use `read_repo_file` only when exact file contents are needed for a finding.",
+    "If dependency manifests or lockfiles changed, call `dependency_review` to check added/removed packages and known vulnerabilities before commenting on dependency risk.",
     projectContext
       ? `\n## Project context — the project's own conventions/memory; honour these\n${projectContext}`
       : null,
