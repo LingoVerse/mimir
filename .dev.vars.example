@@ -27,6 +27,7 @@ GITHUB_TOKEN=""                                            # PAT: Pull requests 
 POST_NITS="false"
 DIFF_MAX_TOKENS="60000"
 SKIP_LABELS="mimir:skip"
+ALLOWED_OWNERS=""                                          # repo owners (logins/orgs) the bot serves; empty=all. SET for a public App
 
 # --- Admin (optional) ---
 # ADMIN_TOKEN=""                                           # if set, GET /admin requires `Authorization: Bearer <token>`

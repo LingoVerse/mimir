@@ -104,6 +104,20 @@ Cross-org works because Mimir reads `installation.id` from each webhook payload 
 token for that installation. `GITHUB_APP_INSTALLATION_ID` is only a fallback (used when a
 payload carries no installation, e.g. a plain repo webhook).
 
+> ⚠️ **Lock it down before enabling the App webhook.** A **public** App (`Any account` under
+> _Where can this app be installed_) can be installed by anyone — and once the App webhook is
+> on, their events reach **your** Worker: it would review their PRs on your OpenRouter credits
+> and read/write their repos. Protect yourself with **either**:
+>
+> - **`ALLOWED_OWNERS`** — comma-separated allowlist of owner logins/orgs (e.g.
+>   `ALLOWED_OWNERS=acme,your-login`). Events for any other owner are ignored — auto-review and
+>   commands alike. Set this whenever the App is public.
+> - **A private App** — App settings → _Where can this app be installed_ → **Only on this
+>   account** (nobody else can install it).
+>
+> With neither, a public App + App webhook serves anyone. Mimir logs a startup warning when App
+> auth is configured without `ALLOWED_OWNERS`.
+
 **Personal access token** (simpler; comments authored by you):
 
 | Type                               | Where                                          | Grant                                                                              |
