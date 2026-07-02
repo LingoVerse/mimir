@@ -15,7 +15,13 @@ const EnvSchema = v.object({
   // Required
   OPENROUTER_API_KEY: required("OPENROUTER_API_KEY"),
   GITHUB_WEBHOOK_SECRET: required("GITHUB_WEBHOOK_SECRET"),
-  GITHUB_TOKEN: required("GITHUB_TOKEN"),
+  // GitHub auth: EITHER a personal access token (GITHUB_TOKEN) OR a GitHub App
+  // (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID). The
+  // App path authors comments as "<AppName>[bot]". Enforced in validateEnv below.
+  GITHUB_TOKEN: v.optional(v.string()),
+  GITHUB_APP_ID: wholeNumber("GITHUB_APP_ID"),
+  GITHUB_APP_PRIVATE_KEY: v.optional(v.string()),
+  GITHUB_APP_INSTALLATION_ID: wholeNumber("GITHUB_APP_INSTALLATION_ID"),
   // Optional (have in-code defaults) — validated only when present
   MODEL_PRIMARY: v.optional(v.string()),
   MODEL_ESCALATION: v.optional(v.string()),
@@ -40,13 +46,28 @@ export type Env = v.InferOutput<typeof EnvSchema>;
 
 export function validateEnv(source: Record<string, string | undefined> = process.env): Env {
   const result = v.safeParse(EnvSchema, source, { abortPipeEarly: true });
-  if (result.success) return result.output;
+  if (!result.success) {
+    const lines = result.issues.map((issue) => {
+      const key = issue.path?.[0]?.key ?? "(env)";
+      return `  - ${String(key)}: ${issue.message}`;
+    });
+    throw new Error(
+      `Invalid environment — fix these before starting Mimir:\n${lines.join("\n")}\n\nSee .env.example and DEPLOY.md.`,
+    );
+  }
 
-  const lines = result.issues.map((issue) => {
-    const key = issue.path?.[0]?.key ?? "(env)";
-    return `  - ${String(key)}: ${issue.message}`;
-  });
-  throw new Error(
-    `Invalid environment — fix these before starting Mimir:\n${lines.join("\n")}\n\nSee .env.example and DEPLOY.md.`,
+  // GitHub auth must be exactly one of: a PAT, or the full GitHub App trio.
+  const env = result.output;
+  const hasPat = Boolean(env.GITHUB_TOKEN);
+  const hasApp = Boolean(
+    env.GITHUB_APP_ID && env.GITHUB_APP_PRIVATE_KEY && env.GITHUB_APP_INSTALLATION_ID,
   );
+  if (!hasPat && !hasApp) {
+    throw new Error(
+      "Invalid environment — GitHub auth not configured: set GITHUB_TOKEN (personal access " +
+        "token), or all of GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY + GITHUB_APP_INSTALLATION_ID " +
+        "(GitHub App).\n\nSee DEPLOY.md.",
+    );
+  }
+  return env;
 }
