@@ -81,9 +81,10 @@ export const runRepoSandboxCommand: RepoSandboxRunner = async ({
     });
     await sandbox.writeFile(archivePath, toBase64(archive), { encoding: "base64" });
     await sandbox.exec(
-      `tar -xzf ${shellQuote(archivePath)} -C ${shellQuote(checkoutPath)} --strip-components 1`,
+      `tar --no-same-owner --no-same-permissions -xzf ${shellQuote(archivePath)} -C ${shellQuote(checkoutPath)} --strip-components 1`,
       { timeout: 30_000 },
     );
+    await sandbox.exec(`find ${shellQuote(checkoutPath)} -type l -delete`, { timeout: 30_000 });
     await sandbox.writeFile(markerPath, checkoutKey);
   }
 

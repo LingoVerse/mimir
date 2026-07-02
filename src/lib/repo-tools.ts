@@ -80,11 +80,16 @@ function commandName(command: string): string | null {
 // find's -exec/-ok family spawns arbitrary programs and -delete/-fprint* write
 // to the filesystem; none of them require a blocked shell metacharacter to use,
 // so they must be rejected on find's own arguments.
-const FIND_UNSAFE_FLAGS = /(?:^|\s)-(exec|execdir|ok|okdir|delete|fprint|fprintf|fls)\b/;
+const FIND_UNSAFE_FLAGS = /(?:^|\s)-(exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)\b/;
 
 // ripgrep's --pre/--pre-glob run an arbitrary command against every searched
 // file, turning a "read-only" search into command execution.
-const RG_UNSAFE_FLAGS = /(?:^|\s)--pre(?:=|-glob\b|-glob=)/;
+const RG_UNSAFE_FLAGS = /(?:^|\s)--pre(?:\s|=|-glob\b|-glob=)/;
+
+// Keep read-only commands scoped to repo-relative paths. This is intentionally
+// conservative: a false positive costs a tool call; a false negative leaks host
+// files on the Node backend.
+const UNSAFE_PATH_ARGS = /(?:^|\s)\/|(?:^|\s)\.\.(?:\/|\s|$)|\/\.\.(?:\/|\s|$)/;
 
 function isSafeCommandArgs(name: string, command: string): boolean {
   if (name === "find") return !FIND_UNSAFE_FLAGS.test(command);
@@ -94,6 +99,7 @@ function isSafeCommandArgs(name: string, command: string): boolean {
 
 export function isSafeSandboxCommand(command: string): boolean {
   if (/[;&|><`$()\\\n\r]/.test(command)) return false;
+  if (UNSAFE_PATH_ARGS.test(command)) return false;
   const name = commandName(command);
   if (!name) return false;
   if (READ_ONLY_COMMANDS.has(name)) return isSafeCommandArgs(name, command);
