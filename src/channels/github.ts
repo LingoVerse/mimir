@@ -3,7 +3,7 @@ import { createGitHubChannel } from "@flue/github";
 import { invoke } from "@flue/runtime";
 import { getDedupStore } from "../lib/dedup.ts";
 import { validateEnv } from "../lib/env.ts";
-import { client } from "../lib/github.ts";
+import { githubClient } from "../lib/github.ts";
 import {
   hasSkipLabel,
   hasSkipMarker,
@@ -78,6 +78,14 @@ export const channel = createGitHubChannel({
     // store falls back to node:sqlite.
     const dedup = getDedupStore((c.env as { DB?: unknown } | undefined)?.DB);
 
+    // GitHub App auth: the installation id is in the webhook payload, so the App
+    // authenticates as the correct installation for this repo's org/account
+    // (cross-org). Absent for PAT auth and plain repo webhooks — githubClient()
+    // then falls back to GITHUB_APP_INSTALLATION_ID.
+    const installationId = (delivery.payload as { installation?: { id?: number } }).installation
+      ?.id;
+    const gh = githubClient(installationId);
+
     if (delivery.name === "pull_request" && REVIEW_ACTIONS.has(delivery.payload.action)) {
       // Opt-out lever: a skip label on the PR excludes it from review entirely
       // (persists across every push, unlike the per-commit marker). Checked from
@@ -93,7 +101,7 @@ export const channel = createGitHubChannel({
       // Loop guard: skip review if the head commit carries a skip marker (e.g. a
       // memory write-back the bot just pushed, or a human opt-out).
       const headSha = delivery.payload.pull_request.head.sha;
-      const { data: commit } = await client.rest.repos.getCommit({
+      const { data: commit } = await gh.rest.repos.getCommit({
         owner: delivery.payload.repository.owner.login,
         repo: delivery.payload.repository.name,
         ref: headSha,
@@ -111,6 +119,7 @@ export const channel = createGitHubChannel({
         number: pull_request.number,
         headSha: pull_request.head.sha,
         baseRef: pull_request.base.ref,
+        installationId,
       };
       await handlePullRequestDelivery(
         { claim: dedup.claim.bind(dedup), release: dedup.release.bind(dedup), admit: admitReview },
@@ -134,7 +143,7 @@ export const channel = createGitHubChannel({
           console.log("[mimir] duplicate /review delivery skipped", delivery.deliveryId);
           return;
         }
-        const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+        const { data: pr } = await gh.rest.pulls.get({ owner, repo, pull_number: prNumber });
         console.log("[mimir] /review command from", comment.user?.login ?? "unknown");
         await admitReview({
           owner,
@@ -142,6 +151,7 @@ export const channel = createGitHubChannel({
           number: prNumber,
           headSha: pr.head.sha,
           baseRef: pr.base.ref,
+          installationId,
         });
         return;
       }
@@ -154,9 +164,9 @@ export const channel = createGitHubChannel({
           return;
         }
         // issue_comment lacks PR head info; fetch it to get the head ref + fork status.
-        const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+        const { data: pr } = await gh.rest.pulls.get({ owner, repo, pull_number: prNumber });
         if (pr.head.repo?.full_name !== `${owner}/${repo}`) {
-          await client.rest.issues.createComment({
+          await gh.rest.issues.createComment({
             owner,
             repo,
             issue_number: prNumber,
@@ -172,13 +182,14 @@ export const channel = createGitHubChannel({
           headRef: pr.head.ref,
           fact,
           source,
+          installationId,
         });
         return;
       }
 
       // Auto-detect maintainer feedback worth remembering (no explicit command).
       if (isLikelyFeedback(comment.body)) {
-        const { data: pr } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+        const { data: pr } = await gh.rest.pulls.get({ owner, repo, pull_number: prNumber });
         if (pr.head.repo?.full_name !== `${owner}/${repo}`) return; // fork — can't push memory
         if (!(await dedup.claim(delivery.deliveryId))) {
           console.log("[mimir] duplicate feedback delivery skipped", delivery.deliveryId);
@@ -191,6 +202,7 @@ export const channel = createGitHubChannel({
           headRef: pr.head.ref,
           commentBody: comment.body,
           commentAuthor: comment.user?.login ?? "unknown",
+          installationId,
         });
         return;
       }
