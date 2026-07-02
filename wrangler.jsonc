@@ -5,6 +5,12 @@
   // Flue's runtime uses Node.js APIs; nodejs_compat also populates process.env
   // from vars/secrets (compatibility_date >= 2025-04-01), which the app reads.
   "compatibility_flags": ["nodejs_compat"],
+  // Non-secret config, editable in the Cloudflare dashboard (Settings → Variables).
+  // Override the model tiers here without touching secrets or code.
+  "vars": {
+    "MODEL_PRIMARY": "openrouter/deepseek/deepseek-v4-flash",
+    "MODEL_ESCALATION": "openrouter/z-ai/glm-5.2"
+  },
   // Durable Object migrations for Flue's generated classes. FlueRegistry is
   // Flue-internal (run indexing); the others are one per discovered workflow.
   // Never rewrite/reorder a deployed migration entry — append a new tag instead.

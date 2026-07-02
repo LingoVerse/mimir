@@ -16,3 +16,4 @@ data/
 # Cloudflare build artifacts
 .flue-vite*
 .wrangler/
+*.pem
