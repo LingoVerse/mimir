@@ -22,7 +22,6 @@ const READ_ONLY_COMMANDS = new Set([
   "jq",
   "ls",
   "rg",
-  "sed",
   "wc",
 ]);
 const EXEC_COMMANDS = new Set([
@@ -34,6 +33,7 @@ const EXEC_COMMANDS = new Set([
   "npm",
   "pnpm",
   "pytest",
+  "sed", // its w/W/e commands and -i flag write files and run shell commands
   "yarn",
 ]);
 
@@ -77,11 +77,21 @@ function commandName(command: string): string | null {
   return match[0].split("/").pop() ?? null;
 }
 
+// find's -exec/-ok family spawns arbitrary programs and -delete/-fprint* write
+// to the filesystem; none of them require a blocked shell metacharacter to use,
+// so they must be rejected on find's own arguments.
+const FIND_UNSAFE_FLAGS = /(?:^|\s)-(exec|execdir|ok|okdir|delete|fprint|fprintf|fls)\b/;
+
+function isSafeCommandArgs(name: string, command: string): boolean {
+  if (name === "find") return !FIND_UNSAFE_FLAGS.test(command);
+  return true;
+}
+
 export function isSafeSandboxCommand(command: string): boolean {
   if (/[;&|><`$()\\\n\r]/.test(command)) return false;
   const name = commandName(command);
   if (!name) return false;
-  if (READ_ONLY_COMMANDS.has(name)) return true;
+  if (READ_ONLY_COMMANDS.has(name)) return isSafeCommandArgs(name, command);
   return process.env.REPO_SANDBOX_ALLOW_EXEC === "1" && EXEC_COMMANDS.has(name);
 }
 
@@ -262,7 +272,7 @@ export function repoContextTools(
       if (!isSafeSandboxCommand(command)) {
         return (
           `Command not allowed: ${commandName(command) ?? "<empty>"}. ` +
-          "Allowed by default: awk, find, grep, jq, ls, rg, sed, wc. " +
+          "Allowed by default: awk, find, grep, jq, ls, rg, wc. " +
           "Shell control operators are blocked. Set REPO_SANDBOX_ALLOW_EXEC=1 for build/test commands."
         );
       }

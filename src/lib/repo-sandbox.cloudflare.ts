@@ -20,11 +20,7 @@ function shellQuote(value: string): string {
 }
 
 function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.slice(i, i + 0x8000));
-  }
-  return btoa(binary);
+  return Buffer.from(bytes).toString("base64");
 }
 
 function truncate(text: string, maxChars: number): string {

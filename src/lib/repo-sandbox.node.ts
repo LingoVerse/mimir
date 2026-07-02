@@ -84,20 +84,22 @@ export const runRepoSandboxCommand: RepoSandboxRunner = async ({
     await rm(checkoutPath, { recursive: true, force: true });
     await mkdir(checkoutPath, { recursive: true });
     await writeFile(archivePath, archive);
-    await execFileAsync("tar", ["-xzf", archivePath, "-C", checkoutPath, "--strip-components", "1"], {
-      timeout: 30_000,
-    });
+    await execFileAsync(
+      "tar",
+      ["--no-same-owner", "-xzf", archivePath, "-C", checkoutPath, "--strip-components", "1"],
+      { timeout: 30_000 },
+    );
     await writeFile(markerPath, checkoutKey);
   }
 
   try {
     const executable = command.trim().split(/\s+/, 1)[0];
     if (executable) {
-      await execFileAsync("/usr/bin/env", ["sh", "-lc", `command -v ${executable}`], {
+      await execFileAsync("/usr/bin/env", ["sh", "-c", `command -v ${executable}`], {
         timeout: 5_000,
       });
     }
-    const result = await execFileAsync("/bin/sh", ["-lc", command], {
+    const result = await execFileAsync("/bin/sh", ["-c", command], {
       cwd: checkoutPath,
       timeout: timeoutMs,
       maxBuffer: maxOutputChars * 4,
