@@ -42,7 +42,7 @@ test("repoContextTools returns the repo context tools", () => {
   const tools = repoContextTools({} as never, { owner: "o", repo: "r", ref: "sha" });
   assert.deepEqual(
     tools.map((t) => t.name),
-    ["read_repo_file", "list_repo_dir", "search_repo", "run_repo_command"],
+    ["run_repo_command", "read_repo_file", "list_repo_dir", "search_repo"],
   );
 });
 
@@ -52,7 +52,7 @@ test("repoContextTools adds dependency_review when base ref is available", () =>
   });
   assert.deepEqual(
     tools.map((t) => t.name),
-    ["read_repo_file", "list_repo_dir", "search_repo", "run_repo_command", "dependency_review"],
+    ["run_repo_command", "read_repo_file", "list_repo_dir", "search_repo", "dependency_review"],
   );
 });
 
@@ -121,7 +121,7 @@ test("repoContextTools executes within budget", async () => {
     hits += 1;
     return { data: [] };
   });
-  const [, listDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
+  const [, , listDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
   assert.ok(listDir);
   await listDir.run({ input: { path: "" } });
   assert.equal(hits, 1);
@@ -136,7 +136,7 @@ test("repoContextTools blocks calls over budget", async () => {
   const originalBudget = process.env.REPO_TOOL_CALL_BUDGET;
   process.env.REPO_TOOL_CALL_BUDGET = "2";
   try {
-    const [, listDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
+    const [, , listDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
     assert.ok(listDir);
     await listDir.run({ input: { path: "" } });
     await listDir.run({ input: { path: "" } });
@@ -158,7 +158,7 @@ test("repoContextTools budget is shared across tools", async () => {
   const originalBudget = process.env.REPO_TOOL_CALL_BUDGET;
   process.env.REPO_TOOL_CALL_BUDGET = "1";
   try {
-    const [, listDir, searchTool] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
+    const [, , listDir, searchTool] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
     assert.ok(listDir);
     assert.ok(searchTool);
     await listDir.run({ input: { path: "" } });
@@ -182,8 +182,8 @@ test("repoContextTools budget is independent per instance", async () => {
   const originalBudget = process.env.REPO_TOOL_CALL_BUDGET;
   process.env.REPO_TOOL_CALL_BUDGET = "1";
   try {
-    const [, primaryListDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
-    const [, escalationListDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
+    const [, , primaryListDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
+    const [, , escalationListDir] = repoContextTools(client, { owner: "o", repo: "r", ref: "sha" });
     assert.ok(primaryListDir);
     assert.ok(escalationListDir);
     // Primary exhausts its own budget.

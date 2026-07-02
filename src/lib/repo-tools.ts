@@ -190,7 +190,7 @@ export function repoContextTools(
   const readRepoFile = defineTool({
     name: "read_repo_file",
     description:
-      "Read a file from the repository at the PR head to get context the diff omits (a caller, a schema, a related module). Returns the file text.",
+      "Expensive fallback: read a full file from the PR head only after run_repo_command has identified the exact file and full contents are necessary for a finding. Prefer sandbox search/snippets first.",
     input: v.object({
       path: v.pipe(v.string(), v.description('Repo-relative path, e.g. "src/auth/login.ts"')),
     }),
@@ -269,7 +269,7 @@ export function repoContextTools(
   const runRepoCommand = defineTool({
     name: "run_repo_command",
     description:
-      "Run a bounded shell command in a persistent sandbox checkout of the PR head ref. Prefer rg/grep/jq/find for targeted code review context. The checkout is reused until the PR closes or local TTL cleanup removes it. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
+      "Primary repo-context tool: run a bounded shell command in a persistent sandbox checkout of the full PR head repo. Use targeted read-only commands like rg/grep/jq/find/ls/awk/wc to locate symbols, callers, and small snippets instead of loading whole files. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
     input: v.object({
       command: v.pipe(
         v.string(),
@@ -316,7 +316,7 @@ export function repoContextTools(
     },
   });
 
-  const tools: ToolDefinition[] = [readRepoFile, listRepoDir, searchRepo, runRepoCommand];
+  const tools: ToolDefinition[] = [runRepoCommand, readRepoFile, listRepoDir, searchRepo];
 
   if (options.baseRef) {
     tools.push(
