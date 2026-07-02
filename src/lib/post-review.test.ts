@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildSummaryBody, postReview, visibleFindings } from "./post-review.ts";
 import { SqliteDedupStore } from "./dedup.node.ts";
+import { findingMarker } from "./pr-discussion.ts";
 import type { Finding, ReviewResult } from "./review.ts";
 
 const findings: Finding[] = [
@@ -185,4 +186,41 @@ test("buildSummaryBody: fallback section lists inline findings when provided", (
   const body = buildSummaryBody(review(), { escalated: false, reasons: [] }, false, inlineFallback);
   assert.match(body, /### Findings that couldn't be posted inline/);
   assert.match(body, /\*\*\[critical\] C\*\* \(`a\.ts`, line 10\)/);
+});
+
+test("postReview: suppresses duplicate inline comments by fingerprint", async () => {
+  const store = new SqliteDedupStore(":memory:");
+  const postedComments: { path: string; line: number; body: string }[] = [];
+  const existing = findings[0]!;
+  const fakeClient = {
+    rest: {
+      pulls: {
+        listReviewComments: async () => ({
+          data: [
+            {
+              id: 1,
+              path: existing.file,
+              line: existing.line,
+              body: `${findingMarker(existing)}\n**[critical] C**\n\nbc`,
+              user: { login: "mimir[bot]", type: "Bot" },
+            },
+          ],
+        }),
+        createReview: async ({ comments }: { comments: typeof postedComments }) => {
+          postedComments.push(...comments);
+          return {};
+        },
+      },
+      issues: {
+        listComments: async () => ({ data: [] }),
+        createComment: async () => ({ data: { id: 42 } }),
+      },
+    },
+  } as never;
+
+  const result = await postReview(target, review(), meta, fakeClient, store);
+  assert.equal(result.inlineSuppressed, 1);
+  assert.equal(result.inlinePosted, 1);
+  assert.equal(postedComments.length, 1);
+  assert.equal(postedComments[0]!.path, "b.ts");
 });

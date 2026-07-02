@@ -1,5 +1,11 @@
 import type { Octokit } from "@octokit/rest";
 import { type SummaryCommentStore, getSummaryCommentStore } from "./dedup.ts";
+import {
+  existingFindingFingerprints,
+  fetchExistingReviewDiscussion,
+  findingFingerprint,
+  findingMarker,
+} from "./pr-discussion.ts";
 import type { Finding, ReviewResult, Severity } from "./review.ts";
 
 // PR coordinates needed to post. `headSha` is the commit inline comments attach to.
@@ -113,7 +119,7 @@ export function buildSummaryBody(
 }
 
 function inlineCommentBody(f: Finding): string {
-  const parts = [`**[${f.severity}] ${f.title}**`, "", f.body];
+  const parts = [findingMarker(f), `**[${f.severity}] ${f.title}**`, "", f.body];
   if (f.suggestion) parts.push("", `**Suggestion:** ${f.suggestion}`);
   return parts.join("\n");
 }
@@ -122,6 +128,7 @@ export type PostResult = {
   summaryCommentId: number;
   summaryUpdated: boolean;
   inlinePosted: number;
+  inlineSuppressed: number;
 };
 
 // Post the review: one summary comment (created once, updated on re-review) plus
@@ -139,7 +146,24 @@ export async function postReview(
   const prKey = `${owner}/${repo}#${number}`;
 
   // Inline comments FIRST so we know whether they succeeded.
-  const inline = visibleFindings(review.findings, postNits).filter((f) => f.line !== undefined);
+  const inlineCandidates = visibleFindings(review.findings, postNits).filter(
+    (f) => f.line !== undefined,
+  );
+  let discussedFingerprints = new Set<string>();
+  if (inlineCandidates.length > 0) {
+    try {
+      discussedFingerprints = existingFindingFingerprints(
+        await fetchExistingReviewDiscussion(injectedClient, target),
+      );
+    } catch (err) {
+      console.warn(
+        "[mimir] failed to read existing review comments; duplicate suppression disabled:",
+        String(err),
+      );
+    }
+  }
+  const inline = inlineCandidates.filter((f) => !discussedFingerprints.has(findingFingerprint(f)));
+  const inlineSuppressed = inlineCandidates.length - inline.length;
   let inlinePosted = 0;
   let inlineFallback: Finding[] = [];
   if (inline.length > 0) {
@@ -201,5 +225,5 @@ export async function postReview(
     await injectedStore.setSummaryCommentId(prKey, summaryCommentId);
   }
 
-  return { summaryCommentId, summaryUpdated, inlinePosted };
+  return { summaryCommentId, summaryUpdated, inlinePosted, inlineSuppressed };
 }

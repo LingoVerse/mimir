@@ -48,11 +48,13 @@ export function buildInstruction(
   opts?: {
     projectTree?: string;
     priorReview?: { summary: string; findings: Finding[] };
+    existingDiscussion?: string | null;
     scopeFiles?: string[];
   },
 ): string {
   const projectTree = opts?.projectTree;
   const priorReview = opts?.priorReview;
+  const existingDiscussion = opts?.existingDiscussion;
   const scopeFiles = opts?.scopeFiles;
   return [
     "Review this pull-request diff. Apply the `review-rubric` skill to produce your findings.",
@@ -66,6 +68,7 @@ export function buildInstruction(
     projectContext
       ? `\n## Project context — the project's own conventions/memory; honour these\n${projectContext}`
       : null,
+    existingDiscussion,
     projectTree ? `\n## Project tree — directory structure of the head ref\n${projectTree}` : null,
     scopeFiles && scopeFiles.length > 0
       ? `\n## Focus — escalation was triggered for these files; prioritise them\n${scopeFiles.map((f) => `- ${f}`).join("\n")}`
