@@ -248,6 +248,11 @@ async function run(ctx: ActionContext<typeof ReviewPayloadSchema>) {
     } catch (postErr) {
       logEvent(log, "review-failure notice failed", { error: String(postErr) });
     }
+    // Return, don't re-throw: withRetry already exhausted transient errors inside
+    // the pass, so a throw here is deterministic (e.g. a context-size overflow that
+    // recurs on every attempt). Re-throwing would make Flue re-run the whole
+    // expensive review up to DURABILITY_DEFAULT_MAX_ATTEMPTS (10) times for nothing.
+    // The failure is already surfaced via the PR notice + the `review failed` log.
     return { pr: payload, failed: true, error: String(err).slice(0, 500) };
   }
 }
