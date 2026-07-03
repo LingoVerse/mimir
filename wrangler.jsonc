@@ -8,8 +8,10 @@
   // Non-secret config, editable in the Cloudflare dashboard (Settings → Variables).
   // Override the model tiers here without touching secrets or code.
   "vars": {
-    "MODEL_PRIMARY": "openrouter/deepseek/deepseek-v4-flash",
-    "MODEL_ESCALATION": "openrouter/z-ai/glm-5.2"
+    "MODEL_PRIMARY": "openrouter/deepseek/deepseek-v4-pro",
+    "MODEL_ESCALATION": "openrouter/deepseek/deepseek-v4-pro", // z-ai/glm-5.2",
+    "ALLOWED_OWNERS": "lapa2112,lapasolutions",
+    "ESCALATION_DIFF_THRESHOLD": 3000
   },
   "containers": [
     {
@@ -51,7 +53,7 @@
     {
       "binding": "DB",
       "database_name": "mimir",
-      "database_id": "REPLACE_WITH_wrangler_d1_create_OUTPUT"
+      "database_id": "061220b5-5604-4982-992c-4de909dc41a6"
     }
   ]
 }
