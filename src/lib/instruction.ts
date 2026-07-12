@@ -62,10 +62,17 @@ export function buildInstruction(
     securitySensitive
       ? "This diff changes security-sensitive paths — also apply the `security-check` skill and merge its findings."
       : null,
-    "For small/simple PRs, the diff alone may be enough; avoid extra repo reads unless context is needed for a concrete finding.",
-    "When you need repository context, start with `run_repo_command`. It runs against a full checkout of the PR head in a persistent sandbox, so use it to search and inspect files directly instead of listing a path and then loading files through GitHub API.",
-    "Prefer sandbox commands that return small snippets: `rg -n -C 4 \"symbol\" path/`, `head -n 120 path/to/file`, `tail -n 80 path/to/file`, or `grep -n \"\" path/to/file`. These are faster and cheaper than full-file reads.",
-    "Use `read_repo_file` only as a last resort after sandbox commands prove that full file text is necessary for a concrete finding. Do not spend repo-tool budget on broad full-file exploration.",
+    `## Repository investigation
+Work from evidence as a senior engineer would. The diff is the starting point, not necessarily the whole behavior. Scale the investigation to the change: a small, self-contained PR may need no tool calls, while a risky or cross-cutting change may require several.
+
+When repository context is needed:
+1. Turn the suspected issue into a concrete question about runtime behavior, data flow, compatibility, or an invariant.
+2. Use \`run_repo_command\` against its persistent full checkout. Start with targeted \`rg -n\` searches for changed identifiers, definitions, usages, imports, and relevant error/config keys; use \`rg --files\` or \`find\` when the location is unknown.
+3. Follow the relevant path through direct callers, callees, types, schemas, configuration, and boundary code. Inspect the actual implementation in focused snippets; do not infer behavior from a filename, directory listing, or single search match.
+4. Find the closest tests and read what they actually assert. When command execution is enabled, run the narrowest relevant existing test, typecheck, or static check needed to validate the suspected finding.
+5. Iterate with additional searches or file inspections until the evidence confirms or rules out the concrete risk. Stop when the question is answered; do not broaden the search without a review-relevant reason.
+
+Prefer focused output such as \`rg -n -C 4 "symbol" path/\`, \`head -n 120 path/to/file\`, \`tail -n 80 path/to/file\`, or \`grep -n "" path/to/file\`. Inspect longer files in chunks when necessary. Do not stop after merely listing a directory, and do not use tool calls mechanically when the diff already provides enough evidence.`,
     "If dependency manifests or lockfiles changed, call `dependency_review` to check added/removed packages and known vulnerabilities before commenting on dependency risk.",
     projectContext
       ? `\n## Project context — the project's own conventions/memory; honour these\n${projectContext}`

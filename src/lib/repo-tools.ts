@@ -9,23 +9,10 @@ export interface RepoRef {
   ref: string; // commit SHA or branch
 }
 
-const MAX_FILE_CHARS = 20_000;
 const MAX_SEARCH_RESULTS = 15;
 const MAX_COMMAND_OUTPUT_CHARS = 20_000;
-const MIN_TOOL_BUDGET = 8;
-const MAX_TOOL_BUDGET = 40;
 
-const READ_ONLY_COMMANDS = new Set([
-  "awk",
-  "find",
-  "grep",
-  "head",
-  "jq",
-  "ls",
-  "rg",
-  "tail",
-  "wc",
-]);
+const READ_ONLY_COMMANDS = new Set(["awk", "find", "grep", "head", "jq", "ls", "rg", "tail", "wc"]);
 const EXEC_COMMANDS = new Set([
   "bun",
   "cargo",
@@ -46,25 +33,6 @@ export interface RepoToolOptions {
 
 export function repoSandboxId(owner: string, repo: string, prNumber: number): string {
   return `${owner}/${repo}#${prNumber}`;
-}
-
-// Per-pass repo-tool-call budget. An explicit REPO_TOOL_CALL_BUDGET pins it (escape
-// hatch / tests); otherwise it scales with the reviewed-file count — roughly one
-// context read per file — so a 20-file PR isn't starved by the small-PR floor,
-// bounded to [MIN_TOOL_BUDGET, REPO_TOOL_CALL_BUDGET_MAX].
-export function resolveToolBudget(fileCount: number): number {
-  const fixed = process.env.REPO_TOOL_CALL_BUDGET;
-  if (fixed !== undefined) return parseInt(fixed, 10);
-  const maxRaw = Number(process.env.REPO_TOOL_CALL_BUDGET_MAX);
-  const max = Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : MAX_TOOL_BUDGET;
-  return Math.min(max, Math.max(MIN_TOOL_BUDGET, fileCount));
-}
-
-// Reject absolute paths and traversal — the model only addresses paths within
-// the fixed {owner, repo, ref}, never escapes the repo.
-export function isSafeRepoPath(path: string): boolean {
-  if (path.startsWith("/")) return false;
-  return !path.split("/").includes("..");
 }
 
 function errMessage(err: unknown): string {
@@ -148,130 +116,26 @@ function formatDependencyReview(data: unknown): string {
       .filter(Boolean)
       .join(" ");
   });
-  if (data.length > MAX_SEARCH_RESULTS) lines.push(`... [${data.length - MAX_SEARCH_RESULTS} more]`);
+  if (data.length > MAX_SEARCH_RESULTS)
+    lines.push(`... [${data.length - MAX_SEARCH_RESULTS} more]`);
   return lines.join("\n");
 }
 
-// Read-only tools scoped to one repo + ref, so the reviewer can pull context the
-// diff doesn't show (callers, schemas, related modules). The scope is fixed by
-// the closure — tool parameters only choose paths/queries, never the repo/ref
-// (parameters are not an authorization boundary).
+// Repo tools scoped to one repo + ref. General repository exploration happens
+// only through the persistent checkout: exposing GitHub file/list/search tools
+// alongside it caused reviewers to clone once, then abandon the checkout for
+// slower, fragmented API reads.
 export function repoContextTools(
   client: Octokit,
   { owner, repo, ref }: RepoRef,
-  fileCount = 0,
   options: RepoToolOptions = {},
 ): ToolDefinition[] {
-  const budget = resolveToolBudget(fileCount);
-  let callCount = 0;
-  // Cached tree entries for search_repo (fetched once from the head ref).
-  let repoTree: string[] | null = null;
   const sandboxId = options.sandboxId ?? `${owner}-${repo}-${ref}`;
-
-  function guardedExecute(
-    toolName: string,
-    arg: string,
-    fn: () => Promise<string>,
-  ): Promise<string> {
-    callCount += 1;
-    console.log(`[mimir] repo-tool call ${callCount}/${budget}`, { tool: toolName, arg });
-    if (callCount > budget) {
-      console.warn(`[mimir] repo-tool budget exhausted`, {
-        tool: toolName,
-        arg,
-        callCount,
-        budget,
-      });
-      return Promise.resolve(
-        `Tool-call budget exhausted (${budget} calls); rely on the diff and findings already gathered.`,
-      );
-    }
-    return fn();
-  }
-
-  const readRepoFile = defineTool({
-    name: "read_repo_file",
-    description:
-      "Expensive fallback: read a full file from the PR head only after run_repo_command has identified the exact file and full contents are necessary for a finding. Prefer sandbox search/snippets first.",
-    input: v.object({
-      path: v.pipe(v.string(), v.description('Repo-relative path, e.g. "src/auth/login.ts"')),
-    }),
-    run: async ({ input: { path } }) => {
-      if (!isSafeRepoPath(path)) return `Invalid path: ${path}`;
-      return guardedExecute("read_repo_file", path, async () => {
-        try {
-          const { data } = await client.rest.repos.getContent({ owner, repo, path, ref });
-          if (Array.isArray(data) || data.type !== "file" || !data.content) {
-            return `Not a readable file: ${path}`;
-          }
-          const text = Buffer.from(data.content, "base64").toString("utf8");
-          return text.length > MAX_FILE_CHARS
-            ? `${text.slice(0, MAX_FILE_CHARS)}\n… [truncated ${text.length - MAX_FILE_CHARS} chars]`
-            : text;
-        } catch (err) {
-          return `Could not read ${path}: ${errMessage(err)}`;
-        }
-      });
-    },
-  });
-
-  const listRepoDir = defineTool({
-    name: "list_repo_dir",
-    description: "List the entries of a directory in the repository at the PR head.",
-    input: v.object({
-      path: v.optional(
-        v.pipe(v.string(), v.description('Repo-relative directory, "" for the root')),
-      ),
-    }),
-    run: async ({ input: { path } }) => {
-      const dir = path ?? "";
-      if (!isSafeRepoPath(dir)) return `Invalid path: ${dir}`;
-      return guardedExecute("list_repo_dir", dir, async () => {
-        try {
-          const { data } = await client.rest.repos.getContent({ owner, repo, path: dir, ref });
-          if (!Array.isArray(data)) return `Not a directory: ${dir}`;
-          return data.map((e) => `${e.type === "dir" ? "dir " : "file"} ${e.path}`).join("\n");
-        } catch (err) {
-          return `Could not list ${dir}: ${errMessage(err)}`;
-        }
-      });
-    },
-  });
-
-  const searchRepo = defineTool({
-    name: "search_repo",
-    description:
-      "Search this repository (PR head ref) by file path for a symbol or string. Returns matching file paths to read — use to locate definitions/usages related to the diff. Searches the PR head so new code is visible.",
-    input: v.object({
-      query: v.pipe(v.string(), v.description("Search terms, e.g. a function or class name")),
-    }),
-    run: async ({ input: { query } }) => {
-      return guardedExecute("search_repo", query, async () => {
-        try {
-          if (repoTree === null) {
-            const { data } = await client.rest.git.getTree({
-              owner,
-              repo,
-              tree_sha: ref,
-              recursive: "1",
-            });
-            repoTree = data.tree.filter((e) => e.path && e.type === "blob").map((e) => e.path!);
-          }
-          const q = query.toLowerCase();
-          const matches = repoTree.filter((p) => p.toLowerCase().includes(q));
-          if (matches.length === 0) return `No matches for: ${query}`;
-          return matches.slice(0, MAX_SEARCH_RESULTS).join("\n");
-        } catch (err) {
-          return `Search unavailable for "${query}": ${errMessage(err)}`;
-        }
-      });
-    },
-  });
 
   const runRepoCommand = defineTool({
     name: "run_repo_command",
     description:
-      "Primary repo-context tool: run a bounded shell command in a persistent sandbox checkout of the full PR head repo. Use targeted read-only commands like rg/grep/head/tail/jq/find/ls/awk/wc to locate symbols, callers, and inspect small file snippets instead of loading whole files. Examples: `rg -n -C 4 \"Button\" packages/design-system`, `head -n 120 packages/design-system/index.tsx`, `grep -n \"\" packages/design-system/package.json`. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.",
+      'The general-purpose repository exploration tool. It runs commands in a persistent sandbox checkout of the full PR head, so call it repeatedly to search symbols and callers, inspect any files or snippets, and validate findings across the repository. Prefer targeted rg/grep/head/tail/jq/find/ls/awk/wc commands; read long files in chunks when needed. Examples: `rg -n -C 4 "Button" packages/design-system`, `head -n 120 packages/design-system/index.tsx`, `grep -n "" packages/design-system/package.json`. Build/test commands require REPO_SANDBOX_ALLOW_EXEC=1 because they execute untrusted repo code on the runner.',
     input: v.object({
       command: v.pipe(
         v.string(),
@@ -290,35 +154,34 @@ export function repoContextTools(
         );
       }
 
-      return guardedExecute("run_repo_command", command, async () => {
-        try {
-          let archive: Uint8Array | undefined;
-          if (await repoSandboxNeedsArchive({ checkoutKey: ref, sandboxId })) {
-            const { data } = await client.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
-              owner,
-              repo,
-              ref,
-            });
-            archive = tarballBuffer(data);
-          }
-          const boundedTimeout = Math.max(1_000, Math.min(timeoutMs ?? 15_000, 60_000));
-          const result = await runRepoSandboxCommand({
-            archive,
-            checkoutKey: ref,
-            command,
-            timeoutMs: boundedTimeout,
-            maxOutputChars: MAX_COMMAND_OUTPUT_CHARS,
-            sandboxId,
+      console.log("[mimir] repo-sandbox command", { command });
+      try {
+        let archive: Uint8Array | undefined;
+        if (await repoSandboxNeedsArchive({ checkoutKey: ref, sandboxId })) {
+          const { data } = await client.request("GET /repos/{owner}/{repo}/tarball/{ref}", {
+            owner,
+            repo,
+            ref,
           });
-          return truncateOutput(result.output);
-        } catch (err) {
-          return `Command failed: ${errMessage(err)}`;
+          archive = tarballBuffer(data);
         }
-      });
+        const boundedTimeout = Math.max(1_000, Math.min(timeoutMs ?? 15_000, 60_000));
+        const result = await runRepoSandboxCommand({
+          archive,
+          checkoutKey: ref,
+          command,
+          timeoutMs: boundedTimeout,
+          maxOutputChars: MAX_COMMAND_OUTPUT_CHARS,
+          sandboxId,
+        });
+        return truncateOutput(result.output);
+      } catch (err) {
+        return `Command failed: ${errMessage(err)}`;
+      }
     },
   });
 
-  const tools: ToolDefinition[] = [runRepoCommand, readRepoFile, listRepoDir, searchRepo];
+  const tools: ToolDefinition[] = [runRepoCommand];
 
   if (options.baseRef) {
     tools.push(
@@ -329,17 +192,16 @@ export function repoContextTools(
         input: v.object({}),
         run: async () => {
           const basehead = `${options.baseRef}...${ref}`;
-          return guardedExecute("dependency_review", basehead, async () => {
-            try {
-              const { data } = await client.request(
-                "GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}",
-                { owner, repo, basehead },
-              );
-              return formatDependencyReview(data);
-            } catch (err) {
-              return `Dependency review unavailable: ${errMessage(err)}`;
-            }
-          });
+          console.log("[mimir] dependency review", { basehead });
+          try {
+            const { data } = await client.request(
+              "GET /repos/{owner}/{repo}/dependency-graph/compare/{basehead}",
+              { owner, repo, basehead },
+            );
+            return formatDependencyReview(data);
+          } catch (err) {
+            return `Dependency review unavailable: ${errMessage(err)}`;
+          }
         },
       }),
     );
