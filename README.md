@@ -18,7 +18,7 @@ GitHub webhook                                           (channels/github.ts)
   → fetch and chunk diff, skip generated/vendored + `.mimirignore`
                                                          (lib/diff.ts, lib/ignore.ts)
   → load project context: conventions, memory, project tree from the base branch
-     + read-only repo tools (head-ref search, file read, ls)
+     + persistent sandbox checkout of the PR head
                                                          (lib/project-context.ts, lib/repo-tools.ts)
   → primary review on a cheap model                       (workflows/review-pr.ts + skills/)
      rubric always; security-check on sensitive paths
@@ -84,8 +84,6 @@ startup** and refuses to boot if a required var is missing or malformed.
 | `ESCALATION_DIFF_THRESHOLD` |          | `400`                                      | changed-lines trigger for escalation                                                                    |
 | `ESCALATE_SECURITY_ALWAYS`  |          | `true`                                     | always escalate on security-sensitive paths (vs only when findings exist)                               |
 | `DIFF_MAX_TOKENS`           |          | `60000`                                    | diff token budget (largest-change files kept)                                                           |
-| `REPO_TOOL_CALL_BUDGET`     |          | auto                                       | pin per-pass repo-tool calls (else scales ~1/reviewed file)                                             |
-| `REPO_TOOL_CALL_BUDGET_MAX` |          | `40`                                       | cap when the tool-call budget auto-scales with PR size                                                  |
 | `POST_NITS`                 |          | `false`                                    | also post `nit`-severity comments                                                                       |
 | `SKIP_LABELS`               |          | `mimir:skip`                               | comma-separated PR labels that exclude the whole PR from review                                         |
 | `ALLOWED_OWNERS`            |          | all                                        | comma-separated allowlist of repo owners (logins/orgs) the bot serves — **set for a public GitHub App** |
@@ -152,11 +150,11 @@ The Cloudflare **D1** backend is tested in workerd via `bun run test:cf`
   ```
 - **Context beyond the diff.** The reviewer reads the project's own agent-guidance
   (`CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md`, `.mimir/memory/*`) from the
-  base branch, plus the **full project tree** (directory structure of the head ref), and has
-  read-only, repo-scoped tools (`read_repo_file`, `list_repo_dir`, `search_repo`) to pull
-  related code. `search_repo` searches the **PR head ref** (not the default branch) — new code
-  in the PR is findable. Memory is writeable via `/remember` and `/feedback` commands (maintainer-
-  gated). Read-only; untrusted PR code is never executed.
+  base branch, plus the **full project tree** (directory structure of the head ref). For deeper
+  context it gets a persistent sandbox checkout of the **PR head** and searches or inspects it
+  directly with bounded commands; duplicate GitHub file/list/search tools are intentionally not
+  exposed. Memory is writeable via `/remember` and `/feedback` commands (maintainer-gated).
+  Read-only by default; untrusted PR code is never executed unless explicitly enabled.
 
 ## Non-goals
 

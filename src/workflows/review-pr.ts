@@ -53,11 +53,9 @@ async function runReview({ harness, log, input: payload }: ActionContext<typeof 
   const filenames = diff.files.map((f) => f.filename);
   const securitySensitive = touchesSensitivePath(filenames);
   const sensitiveFiles = listSensitiveFiles(filenames);
-  // Read-only repo tools scoped to the PR head, so the model can pull related
-  // code the diff omits. Each pass gets its OWN instance: the call budget lives
-  // in the closure (repo-tools.ts), so a shared instance would let the primary
-  // pass starve the escalation pass of context reads. The escalation tools are
-  // built lazily below, only when we actually escalate.
+  // A persistent sandbox checkout scoped to the PR head lets the model search
+  // and inspect related code the diff omits. The escalation tools are built
+  // lazily below, only when we actually escalate.
   const toolRef = { owner: payload.owner, repo: payload.repo, ref: payload.headSha };
   const sandboxOptions = {
     sandboxId: repoSandboxId(payload.owner, payload.repo, payload.number),
@@ -82,7 +80,7 @@ async function runReview({ harness, log, input: payload }: ActionContext<typeof 
     existingDiscussion,
     projectTree,
   });
-  const tools = repoContextTools(gh, toolRef, diff.files.length, sandboxOptions);
+  const tools = repoContextTools(gh, toolRef, sandboxOptions);
 
   // 2. Primary pass on MODEL_PRIMARY.
   const session = await harness.session();
@@ -133,7 +131,7 @@ async function runReview({ harness, log, input: payload }: ActionContext<typeof 
       escalationSession.prompt(escalationInstruction, {
         result: ReviewResultSchema,
         model: ESCALATION_MODEL,
-        tools: repoContextTools(gh, toolRef, diff.files.length, sandboxOptions),
+        tools: repoContextTools(gh, toolRef, sandboxOptions),
       }),
     );
     review = escalationResult.data;
