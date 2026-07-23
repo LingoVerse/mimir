@@ -41,6 +41,17 @@ async function runReview({ harness, log, input: payload }: ActionContext<typeof 
   // bot. PAT auth / missing id fall back inside githubClient().
   const gh = githubClient(payload.installationId);
 
+  try {
+    await gh.rest.reactions.createForIssue({
+      owner: payload.owner,
+      repo: payload.repo,
+      issue_number: payload.number,
+      content: "eyes",
+    });
+  } catch (err) {
+    logEvent(log, "reaction add failed", { error: String(err) });
+  }
+
   // 1. Fetch the diff + the project's own conventions/memory (from the base ref).
   //    `.mimirignore` (read from the trusted base ref) drops project-declared
   //    generated paths from the diff before review.
